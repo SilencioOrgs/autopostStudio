@@ -83,4 +83,12 @@ check("NEXT_PUBLIC_SITE_URL", (v) => {
   }
 });
 
+check("CLOUDFLARE_ACCOUNT_ID", (v) => {
+  return v.length >= 5 ? true : "expected Cloudflare account ID";
+});
+
+check("CLOUDFLARE_API_TOKEN", (v) => {
+  return v.length >= 10 ? true : "expected Cloudflare API token";
+});
+
 process.exit(exitCode);

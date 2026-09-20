@@ -7,7 +7,7 @@ import { FacebookIcon } from "@/_components/ui/icons";
 import { Button } from "@/_components/ui/button";
 import { Dialog } from "@/_components/ui/dialog";
 import { useToast } from "@/_components/ui/toast";
-import { MODEL_OPTIONS } from "@/_lib/mock-config";
+import { MODEL_OPTIONS, DEFAULT_IMAGE_MODEL } from "@/_lib/mock-config";
 
 interface FacebookPageItem {
   id: string;
@@ -18,14 +18,6 @@ interface FacebookPageItem {
   token_last4: string;
   token_status: string;
   is_default: boolean;
-  last_verified_at: string | null;
-}
-
-interface ProviderKeyItem {
-  id: string;
-  provider: string;
-  key_last4: string;
-  status: string;
   last_verified_at: string | null;
 }
 
@@ -43,15 +35,10 @@ function SettingsContent() {
   const [timeZone, setTimeZone] = useState("Asia/Manila (PHT, UTC+8)");
   const [runnerActive, setRunnerActive] = useState(true);
 
-  // Live credentials & pages state
-  const [providerKey, setProviderKey] = useState<ProviderKeyItem | null>(null);
+  // Live pages state
   const [pages, setPages] = useState<FacebookPageItem[]>([]);
-
-  // Google Key Input states
-  const [googleKeyInput, setGoogleKeyInput] = useState("");
-  const [showGoogleKey, setShowGoogleKey] = useState(false);
-  const [isSavingKey, setIsSavingKey] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].id);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_IMAGE_MODEL);
+  const [isSavingModel, setIsSavingModel] = useState(false);
 
   // Facebook Modal & Input states
   const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -68,13 +55,12 @@ function SettingsContent() {
   const [draftMode, setDraftMode] = useState(false);
   const [defaultAspect, setDefaultAspect] = useState<"4:5" | "1:1" | "16:9">("4:5");
 
-  // Fetch current user settings & credentials from /api/me
+  // Fetch current user settings & pages
   const refreshUserData = async () => {
     try {
       const res = await fetch("/api/me");
       const json = await res.json();
       if (json.ok && json.data) {
-        setProviderKey(json.data.providerKey || null);
         if (Array.isArray(json.data.pages)) {
           setPages(json.data.pages);
         }
@@ -86,13 +72,25 @@ function SettingsContent() {
 
   useEffect(() => {
     let isMounted = true;
+    // Fetch pages from /api/me
     fetch("/api/me")
       .then((res) => res.json())
       .then((json) => {
         if (isMounted && json.ok && json.data) {
-          setProviderKey(json.data.providerKey || null);
           if (Array.isArray(json.data.pages)) {
             setPages(json.data.pages);
+          }
+        }
+      })
+      .catch(() => {});
+
+    // Fetch settings (including image model)
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then((json) => {
+        if (isMounted && json.ok && json.data) {
+          if (json.data.imageModel) {
+            setSelectedModel(json.data.imageModel);
           }
         }
       })
@@ -103,73 +101,32 @@ function SettingsContent() {
     };
   }, []);
 
-  // Save Google AI Studio Key
-  const handleSaveGoogleKey = async () => {
-    const trimmed = googleKeyInput.trim();
-    if (!trimmed) {
-      addToast({
-        title: "Key Required",
-        description: "Please enter your Google AI Studio API key.",
-        variant: "error",
-      });
-      return;
-    }
-
+  // Save image model to profile
+  const handleSaveModel = async () => {
     try {
-      setIsSavingKey(true);
-      const res = await fetch("/api/keys/provider", {
-        method: "POST",
+      setIsSavingModel(true);
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: "google_ai_studio",
-          apiKey: trimmed,
-        }),
+        body: JSON.stringify({ imageModel: selectedModel }),
       });
-
       const json = await res.json();
       if (!res.ok || !json.ok) {
-        throw new Error(json.error?.message || "Failed to verify key");
+        throw new Error(json.error?.message || "Failed to save model");
       }
-
-      setProviderKey(json.data.providerKey);
-      setGoogleKeyInput("");
       addToast({
-        title: "API Key Verified & Saved",
-        description: "Google AI Studio key securely encrypted and stored.",
+        title: "Model Updated",
+        description: `Image generation will use ${MODEL_OPTIONS.find((m) => m.id === selectedModel)?.name || selectedModel}.`,
         variant: "success",
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Validation failed";
       addToast({
-        title: "Verification Failed",
-        description: msg,
+        title: "Error",
+        description: err instanceof Error ? err.message : "Failed to save model.",
         variant: "error",
       });
     } finally {
-      setIsSavingKey(false);
-    }
-  };
-
-  // Delete Google AI Studio Key
-  const handleDeleteGoogleKey = async () => {
-    try {
-      const res = await fetch("/api/keys/provider?provider=google_ai_studio", {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        setProviderKey(null);
-        addToast({
-          title: "API Key Removed",
-          description: "Google AI Studio credentials deleted.",
-          variant: "neutral",
-        });
-      }
-    } catch {
-      addToast({
-        title: "Error",
-        description: "Failed to remove API key.",
-        variant: "error",
-      });
+      setIsSavingModel(false);
     }
   };
 
@@ -309,7 +266,7 @@ function SettingsContent() {
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-border pb-px overflow-x-auto">
         {[
-          { id: "credentials" as const, label: "AI Credentials (BYO)", icon: "key" },
+          { id: "credentials" as const, label: "Image Generation", icon: "cloud" },
           { id: "channels" as const, label: "Social Channels", icon: "share" },
           { id: "rules" as const, label: "Publishing Rules", icon: "tune" },
           { id: "general" as const, label: "General", icon: "settings" },
@@ -333,122 +290,79 @@ function SettingsContent() {
       {/* Tab: AI Credentials */}
       {activeTab === "credentials" && (
         <div className="space-y-6 animate-fade-in">
-          {/* Active Key Status Card */}
-          {providerKey ? (
-            <div className="bg-surface border border-border rounded-xl p-5 sm:p-6 space-y-4 shadow-xs">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-muted block mb-1">
-                    Configured Provider
+          <div className="bg-surface border border-border rounded-xl p-5 sm:p-6 space-y-4 shadow-xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted block mb-1">
+                  Managed Provider
+                </span>
+                <h2 className="text-base font-bold font-display text-foreground flex items-center gap-2">
+                  <span>Cloudflare Workers AI</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-status-success/15 text-status-success font-semibold">
+                    Active
                   </span>
-                  <h2 className="text-base font-bold font-display text-foreground flex items-center gap-2">
-                    <span>Google AI Studio Key</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-status-success/15 text-status-success font-semibold">
-                      Active
-                    </span>
-                  </h2>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDeleteGoogleKey}
-                  className="text-status-error hover:bg-status-error/10 hover:border-status-error"
-                >
-                  Remove Key
-                </Button>
-              </div>
-
-              <div className="p-4 rounded-lg bg-surface-raised border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
-                <div>
-                  <span className="text-muted">Key Identifier: </span>
-                  <span className="text-foreground font-bold">••••{providerKey.key_last4}</span>
-                </div>
-                <div className="text-muted">
-                  Last verified:{" "}
-                  <span className="text-foreground">
-                    {providerKey.last_verified_at
-                      ? new Date(providerKey.last_verified_at).toLocaleDateString()
-                      : "Recently"}
-                  </span>
-                </div>
+                </h2>
               </div>
             </div>
-          ) : (
-            <div className="p-4 rounded-xl border border-dashed border-border bg-surface-raised/40 text-center space-y-1">
-              <p className="text-xs font-semibold text-foreground">No Google AI Studio Key Configured</p>
-              <p className="text-xs text-muted">
-                Add your Gemini API key below to enable automated image rendering and generation.
-              </p>
-            </div>
-          )}
 
-          {/* Key Input Form */}
+            <p className="text-xs text-muted">
+              Image generation uses the Cloudflare Workers AI REST API. Credentials are server-managed and not exposed to the browser.
+            </p>
+
+            <div className="rounded-lg border border-border bg-surface-raised p-4 text-xs text-muted space-y-1">
+              <p>The workspace owner configures <code className="font-mono bg-surface px-1 py-0.5 rounded text-foreground">CLOUDFLARE_ACCOUNT_ID</code> and <code className="font-mono bg-surface px-1 py-0.5 rounded text-foreground">CLOUDFLARE_API_TOKEN</code> in the server environment.</p>
+              <p>No user-supplied API keys are required.</p>
+            </div>
+          </div>
+
+          {/* Model Selection */}
           <div className="bg-surface border border-border rounded-xl p-5 sm:p-6 space-y-5 shadow-xs">
             <div>
               <h2 className="text-sm font-bold font-display text-foreground">
-                {providerKey ? "Update Google AI Studio Key" : "Enter Google AI Studio Key"}
+                Default Image Model
               </h2>
               <p className="text-xs text-muted mt-0.5">
-                Used for primary photorealistic and commercial graphic rendering via Imagen 3 & Gemini 2.5.
+                Choose the Cloudflare Workers AI model used for image generation.
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2.5">
-              <div className="relative flex-grow">
-                <input
-                  type={showGoogleKey ? "text" : "password"}
-                  value={googleKeyInput}
-                  onChange={(e) => setGoogleKeyInput(e.target.value)}
-                  className="w-full h-10 px-3.5 pr-10 rounded-lg bg-surface border border-border text-xs text-foreground font-mono focus:border-foreground focus:outline-none"
-                  placeholder="Paste AIzaSy... key here"
-                />
-                <button
-                  type="button"
-                  aria-label="Toggle key visibility"
-                  onClick={() => setShowGoogleKey(!showGoogleKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground cursor-pointer"
+            <div className="space-y-3">
+              {MODEL_OPTIONS.map((opt) => (
+                <label
+                  key={opt.id}
+                  className={`flex items-center gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${
+                    selectedModel === opt.id
+                      ? "border-foreground bg-surface-raised"
+                      : "border-border bg-surface hover:border-foreground/30"
+                  }`}
                 >
-                  <Icon name={showGoogleKey ? "visibility_off" : "visibility"} size={16} />
-                </button>
-              </div>
-
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={isSavingKey || !googleKeyInput.trim()}
-                onClick={handleSaveGoogleKey}
-              >
-                {isSavingKey ? (
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
-                    Validating...
-                  </span>
-                ) : (
-                  "Test & Save Key"
-                )}
-              </Button>
+                  <input
+                    type="radio"
+                    name="image-model"
+                    value={opt.id}
+                    checked={selectedModel === opt.id}
+                    onChange={() => setSelectedModel(opt.id)}
+                    className="accent-foreground cursor-pointer"
+                  />
+                  <div className="min-w-0">
+                    <span className="text-xs font-bold text-foreground block">
+                      {opt.name}
+                    </span>
+                    <span className="text-[11px] text-muted block mt-0.5">
+                      {opt.description}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted/70 block mt-0.5">
+                      {opt.id}
+                    </span>
+                  </div>
+                </label>
+              ))}
             </div>
 
-            <div>
-              <label
-                htmlFor="settings-model"
-                className="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5"
-              >
-                Default Image Model
-              </label>
-              <select
-                id="settings-model"
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full sm:w-80 h-10 px-3 rounded-lg bg-surface border border-border text-xs text-foreground focus:border-foreground focus:outline-none cursor-pointer"
-              >
-                {MODEL_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.name}
-                  </option>
-                ))}
-              </select>
+            <div className="flex justify-end pt-3 border-t border-border">
+              <Button size="sm" onClick={handleSaveModel} disabled={isSavingModel}>
+                {isSavingModel ? "Saving..." : "Save Model"}
+              </Button>
             </div>
           </div>
         </div>

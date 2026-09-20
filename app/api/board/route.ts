@@ -12,8 +12,8 @@ export async function GET() {
 
     const supabase = await createClient();
 
-    // 1. Ensure Backlog + 14 day columns exist
-    const columns = await ensureBoardColumns(user.id, 14);
+    // 1. Ensure Backlog column exists and retrieve user's dynamic columns
+    const columns = await ensureBoardColumns(user.id);
 
     // 2. Fetch all cards with joined details
     const { data: cards, error: cardsError } = await supabase

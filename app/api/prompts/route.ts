@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status");
     const setId = searchParams.get("setId");
     const q = searchParams.get("q");
+    const sort = searchParams.get("sort") || "created";
+    const direction = searchParams.get("direction") || "desc";
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
     const offset = (page - 1) * limit;
@@ -62,7 +64,20 @@ export async function GET(request: NextRequest) {
       query = query.or(`image_prompt.ilike.%${q}%,caption.ilike.%${q}%,style.ilike.%${q}%`);
     }
 
-    query = query.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+    const sortColumns = {
+      number: "row_index",
+      name: "image_prompt",
+      style: "style",
+      status: "status",
+      created: "created_at",
+    } as const;
+    const sortColumn = sortColumns[sort as keyof typeof sortColumns] || sortColumns.created;
+    const ascending = direction === "asc";
+
+    query = query
+      .order(sortColumn, { ascending })
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     const { data: prompts, count, error } = await query;
 

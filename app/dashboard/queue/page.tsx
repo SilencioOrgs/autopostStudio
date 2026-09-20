@@ -58,6 +58,7 @@ export default function QueuePage() {
   const { addToast } = useToast();
   const [selectedJob, setSelectedJob] = useState<EnrichedJob | null>(null);
   const [isTogglingPause, setIsTogglingPause] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
   // Poll real job queue every 3.5s
@@ -92,6 +93,34 @@ export default function QueuePage() {
       addToast({ title: "Failed to toggle runner", description: msg, variant: "error" });
     } finally {
       setIsTogglingPause(false);
+    }
+  };
+
+  // Handler: Process queued jobs on demand
+  const handleProcessQueue = async () => {
+    setIsProcessing(true);
+    try {
+      const res = await fetch("/api/queue/process", { method: "POST" });
+      const json: ApiResponse<{
+        processedJobs: number;
+        succeeded: number;
+        failed: number;
+        message: string;
+      }> = await res.json();
+
+      if (!json.ok) throw new Error(json.error.message);
+
+      await mutate();
+      addToast({
+        title: "Queue Processed",
+        description: json.data.message,
+        variant: json.data.succeeded > 0 ? "success" : "neutral",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Processing failed";
+      addToast({ title: "Worker execution failed", description: msg, variant: "error" });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -149,12 +178,28 @@ export default function QueuePage() {
             Generation Queue
           </h1>
           <p className="text-sm text-muted mt-1 font-mono">
-            Background tasks dispatched to your BYO Google AI Studio key. Images are uploaded to private storage upon completion.
+            Background image generation tasks dispatched to Cloudflare Workers AI. Generated graphics are uploaded directly to private storage.
           </p>
         </div>
 
         {/* Runner Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="primary"
+            size="sm"
+            loading={isProcessing}
+            disabled={isProcessing || isPaused || activeCount === 0}
+            onClick={handleProcessQueue}
+            className="bg-foreground text-background hover:bg-foreground/90 font-mono"
+          >
+            {isProcessing ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Play size={14} />
+            )}
+            <span>{isProcessing ? "Processing..." : "Process Queue Now"}</span>
+          </Button>
+
           <Button
             variant={isPaused ? "primary" : "outline"}
             size="sm"
@@ -162,7 +207,7 @@ export default function QueuePage() {
             onClick={handleTogglePause}
           >
             {isPaused ? <Play size={14} /> : <Pause size={14} />}
-            <span>{isPaused ? "Resume Runner" : "Pause Runner"}</span>
+            <span>{isPaused ? "Resume Runner" : "Pause"}</span>
           </Button>
         </div>
       </div>
@@ -176,8 +221,8 @@ export default function QueuePage() {
               Generation Runner is Paused
             </p>
             <p className="text-muted leading-relaxed">
-              If paused due to a 429 quota exhaustion, generation will automatically resume when your
-              Google AI Studio quota window resets. You can also click &ldquo;Resume Runner&rdquo; to restart processing immediately.
+              If paused due to a rate limit, generation will automatically resume when the
+              Cloudflare Workers AI rate window resets. You can also click &ldquo;Resume Runner&rdquo; to restart processing immediately.
             </p>
           </div>
         </div>
@@ -276,6 +321,30 @@ export default function QueuePage() {
                     <p className="text-xs text-muted mt-0.5 truncate max-w-md sm:max-w-xl">
                       {job.promptSnippet}
                     </p>
+                    {job.status === "running" && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-accent-generate font-semibold mt-1 animate-pulse">
+                        <Loader2 size={11} className="animate-spin" />
+                        <span>Rendering image via Cloudflare Workers AI...</span>
+                      </div>
+                    )}
+                    {job.status === "queued" && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted mt-1">
+                        <Clock size={11} />
+                        <span>Queued — click &ldquo;Process Queue Now&rdquo; to run immediately</span>
+                      </div>
+                    )}
+                    {job.status === "succeeded" && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-accent-ready mt-1">
+                        <CheckCircle2 size={11} />
+                        <span>Generated &amp; saved to Supabase Storage</span>
+                      </div>
+                    )}
+                    {job.status === "failed" && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-accent-error mt-1 truncate max-w-md">
+                        <XCircle size={11} className="shrink-0" />
+                        <span className="truncate">{job.lastError || "Generation failed"}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 

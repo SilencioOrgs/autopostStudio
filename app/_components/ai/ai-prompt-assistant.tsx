@@ -12,12 +12,13 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  Layers,
+  Download,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/_components/ui/button";
-import { PostGraphic } from "@/_components/ui/post-graphic";
 import { useToast } from "@/_components/ui/toast";
-import { PromptItem } from "@/_data/prompts";
+import { MODEL_OPTIONS, DEFAULT_IMAGE_MODEL } from "@/app/_lib/mock-config";
+import type { ApiResponse } from "@/app/_lib/errors";
 
 export interface GeneratedImagePrompt {
   id: string;
@@ -26,9 +27,12 @@ export interface GeneratedImagePrompt {
   caption: string;
   hashtags: string[];
   aspect: "4:5" | "1:1" | "16:9";
-  model: "imagen-3" | "gemini-2.5-flash" | "dall-e-3";
+  model: string;
   style: string;
-  brand: "Studio Nine" | "Northline Coffee";
+  brand: string;
+  imageUrl?: string;
+  isGeneratingImage?: boolean;
+  generationLatency?: number;
 }
 
 export interface ChatMessage {
@@ -39,33 +43,34 @@ export interface ChatMessage {
   aspect?: "4:5" | "1:1" | "16:9";
   model?: string;
   brand?: string;
+  mode?: "ideas" | "image";
   generatedPrompts?: GeneratedImagePrompt[];
 }
 
 interface AiPromptAssistantProps {
-  onAddPromptToLibrary?: (prompt: PromptItem) => void;
+  onAddPromptToLibrary?: () => void;
   className?: string;
 }
 
 const PRESET_IDEAS = [
   {
-    label: "SaaS Analytics Dashboard",
-    prompt: "Generate an editorial visual prompt showcasing real-time data throughput and clean graphs on a borderless display.",
+    label: "Modern Filipino Farmhouse",
+    prompt: "Modern architectural Filipino bahay na bato farmhouse with lush tropical courtyard, photorealistic, 8k",
     aspect: "4:5" as const,
   },
   {
-    label: "Titanium Mechanical Hardware",
-    prompt: "Generate a macro industrial design prompt for a CNC-milled titanium developer peripheral with high-contrast shadows.",
+    label: "Minimalist Bahay Kubo",
+    prompt: "Contemporary elevated minimalist bahay kubo villa with bamboo slats and warm evening illumination",
     aspect: "1:1" as const,
   },
   {
-    label: "Distributed Cloud Schematic",
-    prompt: "Generate an isometric monochrome system diagram with luminous vector nodes against dark slate.",
+    label: "OFW Dream House",
+    prompt: "Two-storey luxury tropical modern Filipino residence with infinity pool and palm landscaping, sunset light",
     aspect: "16:9" as const,
   },
   {
-    label: "Dev Team Velocity Story",
-    prompt: "Generate an editorial social post prompt illustrating zero-friction developer workflows and terminal pipelines.",
+    label: "Commercial Coffee House",
+    prompt: "Artisanal specialty cafe interior with terracotta walls, rattan chairs, and natural light, architectural photography",
     aspect: "4:5" as const,
   },
 ];
@@ -79,38 +84,37 @@ export function AiPromptAssistant({
 
   // Parameter controls
   const [selectedAspect, setSelectedAspect] = useState<"4:5" | "1:1" | "16:9">("4:5");
-  const [selectedModel, setSelectedModel] = useState<"imagen-3" | "gemini-2.5-flash" | "dall-e-3">("imagen-3");
-  const [selectedBrand, setSelectedBrand] = useState<"Studio Nine" | "Northline Coffee">("Studio Nine");
+  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_IMAGE_MODEL);
+  const [selectedBrand, setSelectedBrand] = useState<string>("Casa Pinoy");
   const [inputQuery, setInputQuery] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [activeGenerationMessage, setActiveGenerationMessage] = useState("");
 
-  // Expanded visual preview state per prompt card id
-  const [expandedPreviewIds, setExpandedPreviewIds] = useState<Record<string, boolean>>({});
-  // Added to library tracker
+  // Trackers
   const [addedPromptIds, setAddedPromptIds] = useState<Record<string, boolean>>({});
-  // Copied feedback tracker
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [generatingCardIds, setGeneratingCardIds] = useState<Record<string, boolean>>({});
 
-  // Initial welcome message with sample generation
+  // Initial welcome message
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "msg-welcome",
       sender: "assistant",
       timestamp: "Just now",
-      text: "Hello! I am your AI Prompt Engineer. Give me a concept or target topic, and I will generate optimized image generation prompts tailored for Imagen 3 and DALL·E 3, complete with engagement-focused Facebook captions and hashtags.",
+      text: "Hello! I am your Cloudflare Workers AI Creative Assistant. Enter any architectural concept or topic, and you can either draft structured prompts or generate live images instantly using FLUX.1 Schnell and Stable Diffusion XL.",
       generatedPrompts: [
         {
           id: "gen-init-1",
-          title: "Distributed Edge Infrastructure Diagram",
+          title: "Modern Filipino Bahay na Bato",
           imagePrompt:
-            "Isometric monochrome diagram of distributed serverless edge nodes, fine vector connection lines, high contrast directional lighting on dark slate surface, 8k resolution, octane render, 4:5 aspect ratio.",
+            "Modern architectural Filipino bahay na bato farmhouse with polished concrete, warm timber accents, lush tropical courtyard garden, dramatic cinematic lighting, photorealistic 8k",
           caption:
-            "Designing for high throughput requires decoupled pipelines and predictable latency. Here is how our engineering team structures edge micro-clusters.",
-          hashtags: ["#SystemEngineering", "#CloudInfrastructure", "#DevOps", "#AutoPost"],
+            "Rooted in tradition, engineered for the future. Blending heritage stone aesthetics with modern passive cooling and seamless indoor-outdoor living.",
+          hashtags: ["#CasaPinoy", "#ModernBahayKubo", "#FilipinoArchitecture", "#TropicalLiving"],
           aspect: "4:5",
-          model: "imagen-3",
-          style: "Technical Isometric Monochrome",
-          brand: "Studio Nine",
+          model: DEFAULT_IMAGE_MODEL,
+          style: "Photorealistic Architectural",
+          brand: "Casa Pinoy",
         },
       ],
     },
@@ -129,8 +133,8 @@ export function AiPromptAssistant({
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     addToast({
-      title: "Prompt copied to clipboard",
-      description: "Ready to paste into external image engines or docs.",
+      title: "Prompt copied",
+      description: "Prompt text copied to clipboard.",
       variant: "neutral",
     });
     setTimeout(() => {
@@ -140,38 +144,204 @@ export function AiPromptAssistant({
 
   const idCounterRef = useRef(100);
 
-  // Handle Add to Library
-  const handleAddToLibrary = (prompt: GeneratedImagePrompt) => {
-    if (onAddPromptToLibrary) {
-      const item: PromptItem = {
-        id: `ai-${idCounterRef.current++}`,
-        brand: prompt.brand,
-        title: prompt.title,
-        imagePrompt: prompt.imagePrompt,
-        caption: prompt.caption,
-        hashtags: prompt.hashtags,
-        aspect: prompt.aspect,
-        model: prompt.model,
-        status: "queued",
-        estimatedCost: "$0.03",
-      };
-      onAddPromptToLibrary(item);
+  // Handle Add to Library (persists directly to database)
+  const handleAddToLibrary = async (prompt: GeneratedImagePrompt) => {
+    try {
+      const res = await fetch("/api/prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imagePrompt: prompt.imagePrompt,
+          caption: prompt.caption,
+          hashtags: prompt.hashtags,
+          style: prompt.style,
+          aspect: prompt.aspect,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error?.message || "Failed to save prompt to database");
+      }
+
+      setAddedPromptIds((prev) => ({ ...prev, [prompt.id]: true }));
+      addToast({
+        title: "Saved to Library",
+        description: `"${prompt.title}" was saved to your prompt repository.`,
+        variant: "success",
+      });
+
+      if (onAddPromptToLibrary) {
+        onAddPromptToLibrary();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Save failed";
+      addToast({ title: "Could not save prompt", description: msg, variant: "error" });
     }
-    setAddedPromptIds((prev) => ({ ...prev, [prompt.id]: true }));
+  };
+
+  // Generate LIVE image via Cloudflare Workers AI for a specific card
+  const handleGenerateImageForCard = async (promptCard: GeneratedImagePrompt) => {
+    setGeneratingCardIds((prev) => ({ ...prev, [promptCard.id]: true }));
     addToast({
-      title: "Prompt Saved to Library",
-      description: `Added "${prompt.title}" to your publishing pipeline.`,
-      variant: "success",
+      title: "Invoking Cloudflare Workers AI",
+      description: `Generating image using ${MODEL_OPTIONS.find((m) => m.id === promptCard.model)?.name || "Workers AI"}...`,
+      variant: "neutral",
     });
+
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptCard.imagePrompt,
+          model: promptCard.model,
+          aspect: promptCard.aspect,
+          style: promptCard.style,
+          title: promptCard.title,
+          caption: promptCard.caption,
+          hashtags: promptCard.hashtags,
+        }),
+      });
+
+      const json: ApiResponse<{
+        imageUrl: string;
+        model: string;
+        latencyMs: number;
+        mimeType: string;
+      }> = await res.json();
+
+      if (!json.ok) {
+        throw new Error(json.error?.message || "Generation failed");
+      }
+
+      // Update card with generated image
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (!msg.generatedPrompts) return msg;
+          return {
+            ...msg,
+            generatedPrompts: msg.generatedPrompts.map((p) => {
+              if (p.id === promptCard.id) {
+                return {
+                  ...p,
+                  imageUrl: json.data.imageUrl,
+                  generationLatency: json.data.latencyMs,
+                };
+              }
+              return p;
+            }),
+          };
+        })
+      );
+
+      addToast({
+        title: "Image Generated",
+        description: `Completed in ${(json.data.latencyMs / 1000).toFixed(2)}s via Cloudflare Workers AI!`,
+        variant: "success",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Generation failed";
+      addToast({ title: "Workers AI Error", description: msg, variant: "error" });
+    } finally {
+      setGeneratingCardIds((prev) => ({ ...prev, [promptCard.id]: false }));
+    }
   };
 
-  // Toggle visual preview
-  const togglePreview = (id: string) => {
-    setExpandedPreviewIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  // Handle Direct Live Image Generation from the input composer
+  const handleDirectGenerateImage = async (overridePrompt?: string, overrideAspect?: "4:5" | "1:1" | "16:9") => {
+    const textToSend = (overridePrompt || inputQuery).trim();
+    if (!textToSend || isGenerating) return;
+
+    const aspectToUse = overrideAspect || selectedAspect;
+    const modelToUse = selectedModel;
+
+    const userMessage: ChatMessage = {
+      id: `user-${idCounterRef.current++}`,
+      sender: "user",
+      timestamp: "Just now",
+      text: textToSend,
+      aspect: aspectToUse,
+      model: modelToUse,
+      brand: selectedBrand,
+      mode: "image",
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInputQuery("");
+    setIsGenerating(true);
+    setActiveGenerationMessage(`Calling Cloudflare Workers AI (${MODEL_OPTIONS.find((m) => m.id === modelToUse)?.name || "Workers AI"})...`);
+
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: textToSend,
+          model: modelToUse,
+          aspect: aspectToUse,
+          saveToLibrary: false,
+        }),
+      });
+
+      const json: ApiResponse<{
+        imageUrl: string;
+        model: string;
+        latencyMs: number;
+        mimeType: string;
+      }> = await res.json();
+
+      if (!json.ok) {
+        throw new Error(json.error?.message || "Image generation failed");
+      }
+
+      const cardId = `gen-${idCounterRef.current++}`;
+      const assistantMessage: ChatMessage = {
+        id: `asst-${idCounterRef.current++}`,
+        sender: "assistant",
+        timestamp: "Just now",
+        text: `Rendered successfully in ${(json.data.latencyMs / 1000).toFixed(2)}s using Cloudflare Workers AI:`,
+        generatedPrompts: [
+          {
+            id: cardId,
+            title: textToSend.length > 40 ? `${textToSend.slice(0, 38)}...` : textToSend,
+            imagePrompt: textToSend,
+            caption: `Modern architectural exploration: ${textToSend}. Generated with Cloudflare Workers AI.`,
+            hashtags: [`#${selectedBrand.replace(/\s+/g, "")}`, "#ArchitecturalRender", "#CloudflareAI"],
+            aspect: aspectToUse,
+            model: modelToUse,
+            style: "Photorealistic Architectural",
+            brand: selectedBrand,
+            imageUrl: json.data.imageUrl,
+            generationLatency: json.data.latencyMs,
+          },
+        ],
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+      addToast({
+        title: "Image Generated",
+        description: `Rendered in ${(json.data.latencyMs / 1000).toFixed(2)}s with Cloudflare Workers AI.`,
+        variant: "success",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Cloudflare generation error";
+      const assistantMessage: ChatMessage = {
+        id: `asst-${idCounterRef.current++}`,
+        sender: "assistant",
+        timestamp: "Just now",
+        text: `Generation failed: ${msg}`,
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+      addToast({ title: "Generation Error", description: msg, variant: "error" });
+    } finally {
+      setIsGenerating(false);
+      setActiveGenerationMessage("");
+    }
   };
 
-  // Handle Submit query to AI
-  const handleSubmit = (overrideText?: string, overrideAspect?: "4:5" | "1:1" | "16:9") => {
+  // Handle Idea Generation (creates structured prompt drafts)
+  const handleDraftPrompts = async (overrideText?: string, overrideAspect?: "4:5" | "1:1" | "16:9") => {
     const textToSend = (overrideText || inputQuery).trim();
     if (!textToSend || isGenerating) return;
 
@@ -185,56 +355,53 @@ export function AiPromptAssistant({
       aspect: aspectToUse,
       model: selectedModel,
       brand: selectedBrand,
+      mode: "ideas",
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInputQuery("");
     setIsGenerating(true);
+    setActiveGenerationMessage("Drafting prompt variations tailored for Workers AI...");
 
-    // TODO(backend): Integrate real POST /api/ai/generate-prompts endpoint
-    setTimeout(() => {
-      const generatedBatch: GeneratedImagePrompt[] = [
-        {
-          id: `gen-${idCounterRef.current++}`,
-          title: textToSend.length > 40 ? `${textToSend.slice(0, 38)}...` : textToSend,
-          imagePrompt: `${textToSend}. Precision engineered framing, studio key light, crisp shadows, ultra-high dynamic range, 8k resolution, photorealistic detailing, optimized for ${selectedModel}.`,
-          caption: `Unlocking higher execution standards: ${textToSend.toLowerCase()}. Engineered for durability and focus.`,
-          hashtags: [`#${selectedBrand.replace(/\s+/g, "")}`, "#EngineeringFlow", "#VisualPipeline"],
+    try {
+      const res = await fetch("/api/ai/generate-prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: textToSend,
           aspect: aspectToUse,
           model: selectedModel,
-          style: "Editorial Studio Photography",
           brand: selectedBrand,
-        },
-        {
-          id: `gen-${idCounterRef.current++}`,
-          title: `Alternate Composition — ${selectedBrand}`,
-          imagePrompt: `Minimalist overhead flat lay concept illustrating: ${textToSend}. Clean geometric surfaces, subtle rim light, volumetric texture, editorial publication quality, ${aspectToUse} framing.`,
-          caption: `Precision in every iteration. Exploring alternative aesthetic directions for our upcoming release.`,
-          hashtags: [`#${selectedBrand.replace(/\s+/g, "")}`, "#DesignSystems", "#ContentEngine"],
-          aspect: aspectToUse,
-          model: selectedModel,
-          style: "Minimalist Geometry",
-          brand: selectedBrand,
-        },
-      ];
+        }),
+      });
+
+      const json: ApiResponse<{ prompts: GeneratedImagePrompt[] }> = await res.json();
+      if (!json.ok) {
+        throw new Error(json.error?.message || "Failed to generate prompt ideas");
+      }
 
       const assistantMessage: ChatMessage = {
         id: `asst-${idCounterRef.current++}`,
         sender: "assistant",
         timestamp: "Just now",
-        text: `I synthesized 2 image generation prompts optimized for ${selectedModel} in ${aspectToUse} ratio. Each includes a calibrated visual prompt, social caption, and relevant tags:`,
-        generatedPrompts: generatedBatch,
+        text: `Synthesized ${json.data.prompts.length} prompt ideas calibrated for ${MODEL_OPTIONS.find((m) => m.id === selectedModel)?.name || "Workers AI"}. You can generate a live image directly or save any prompt to your library:`,
+        generatedPrompts: json.data.prompts,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to draft prompts";
+      addToast({ title: "Drafting Failed", description: msg, variant: "error" });
+    } finally {
       setIsGenerating(false);
-    }, 1400);
+      setActiveGenerationMessage("");
+    }
   };
 
   return (
-    <div className={`flex flex-col h-[740px] max-h-[85vh] bg-surface border border-border rounded-xl overflow-hidden shadow-xs ${className}`}>
+    <div className={`flex flex-col h-[760px] max-h-[85vh] bg-surface border border-border rounded-xl overflow-hidden shadow-xs ${className}`}>
       {/* Assistant Header */}
-      <div className="px-5 py-3.5 border-b border-border bg-surface-strong/60 flex items-center justify-between gap-4">
+      <div className="px-5 py-3.5 border-b border-border bg-surface-raised flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-foreground text-background flex items-center justify-center">
             <Sparkles size={16} />
@@ -242,29 +409,28 @@ export function AiPromptAssistant({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-display font-bold text-sm text-foreground">
-                AI Prompt Engineering Copilot
+                Cloudflare Workers AI Studio
               </h3>
-              <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-foreground text-background font-semibold">
-                v2.4
+              <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-semibold">
+                Live Edge AI
               </span>
             </div>
             <p className="text-xs text-muted">
-              Generates image prompts calibrated for Imagen 3, DALL·E 3, and Meta Graph publishing.
+              Direct REST API generation with FLUX.1 Schnell &amp; Stable Diffusion XL
             </p>
           </div>
         </div>
 
         {/* Quick parameters selector */}
-        <div className="hidden sm:flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Brand */}
-          <select
+          <input
+            type="text"
             value={selectedBrand}
-            onChange={(e) => setSelectedBrand(e.target.value as "Studio Nine" | "Northline Coffee")}
-            className="h-7 px-2 bg-surface border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none cursor-pointer"
-          >
-            <option value="Studio Nine">Studio Nine</option>
-            <option value="Northline Coffee">Northline Coffee</option>
-          </select>
+            onChange={(e) => setSelectedBrand(e.target.value)}
+            placeholder="Brand name"
+            className="h-7 px-2.5 w-28 bg-surface border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none"
+          />
 
           {/* Aspect Ratio */}
           <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-1 text-xs font-mono">
@@ -287,12 +453,14 @@ export function AiPromptAssistant({
           {/* Model selector */}
           <select
             value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value as "imagen-3" | "gemini-2.5-flash" | "dall-e-3")}
-            className="h-7 px-2 bg-surface border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none cursor-pointer"
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="h-7 px-2 bg-surface border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none cursor-pointer max-w-[150px] truncate"
           >
-            <option value="imagen-3">Imagen 3</option>
-            <option value="gemini-2.5-flash">Gemini 2.5</option>
-            <option value="dall-e-3">DALL·E 3</option>
+            {MODEL_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.name}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -308,14 +476,13 @@ export function AiPromptAssistant({
           >
             {/* Assistant Avatar */}
             {msg.sender === "assistant" && (
-              <div className="w-8 h-8 rounded-lg bg-surface-strong border border-border text-foreground flex items-center justify-center shrink-0 mt-1 shadow-xs">
+              <div className="w-8 h-8 rounded-lg bg-surface-raised border border-border text-foreground flex items-center justify-center shrink-0 mt-1 shadow-xs">
                 <Bot size={16} />
               </div>
             )}
 
             {/* Message Body */}
             <div className={`space-y-3 ${msg.sender === "user" ? "max-w-xl" : "flex-1"}`}>
-              {/* Text bubble */}
               {msg.text && (
                 <div
                   className={`p-4 rounded-xl text-xs sm:text-sm leading-relaxed ${
@@ -326,12 +493,11 @@ export function AiPromptAssistant({
                 >
                   <p>{msg.text}</p>
 
-                  {/* User message metadata tags */}
                   {msg.sender === "user" && (
                     <div className="flex flex-wrap items-center gap-1.5 mt-2.5 pt-2 border-t border-background/20 font-mono text-[10px] text-background/80">
                       <span>Aspect: {msg.aspect}</span>
                       <span>•</span>
-                      <span>Model: {msg.model}</span>
+                      <span>Model: {MODEL_OPTIONS.find((m) => m.id === msg.model)?.name || msg.model}</span>
                       <span>•</span>
                       <span>Brand: {msg.brand}</span>
                     </div>
@@ -339,18 +505,18 @@ export function AiPromptAssistant({
                 </div>
               )}
 
-              {/* Assistant Generated Prompts List */}
+              {/* Generated Prompts and Live Images */}
               {msg.generatedPrompts && msg.generatedPrompts.length > 0 && (
                 <div className="space-y-4 pt-1">
                   {msg.generatedPrompts.map((prompt) => {
-                    const isPreviewOpen = !!expandedPreviewIds[prompt.id];
                     const isAdded = !!addedPromptIds[prompt.id];
                     const isCopied = copiedId === prompt.id;
+                    const isCardGenerating = !!generatingCardIds[prompt.id];
 
                     return (
                       <div
                         key={prompt.id}
-                        className="bg-surface border border-border rounded-xl p-4 sm:p-5 space-y-4 shadow-xs transition-all hover:border-border-strong"
+                        className="bg-surface border border-border rounded-xl p-4 sm:p-5 space-y-4 shadow-xs transition-all hover:border-foreground/30"
                       >
                         {/* Prompt Header */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border">
@@ -358,40 +524,95 @@ export function AiPromptAssistant({
                             <h4 className="font-display font-bold text-sm text-foreground">
                               {prompt.title}
                             </h4>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-surface-strong border border-border text-muted">
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
+                              <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-surface-raised border border-border text-muted">
                                 {prompt.style}
                               </span>
-                              <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-surface-strong border border-border text-muted">
+                              <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-surface-raised border border-border text-muted">
                                 {prompt.aspect}
                               </span>
                               <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/20">
-                                {prompt.model}
+                                {MODEL_OPTIONS.find((m) => m.id === prompt.model)?.name || "Workers AI"}
                               </span>
+                              {prompt.generationLatency && (
+                                <span className="font-mono text-[10px] text-status-success font-semibold">
+                                  ⚡ {(prompt.generationLatency / 1000).toFixed(2)}s
+                                </span>
+                              )}
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 self-end sm:self-center">
+                          <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-center">
+                            {/* Live Generation Button */}
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              disabled={isCardGenerating}
+                              onClick={() => handleGenerateImageForCard(prompt)}
+                              className="bg-foreground text-background hover:bg-foreground/90"
+                            >
+                              {isCardGenerating ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Zap size={12} />
+                              )}
+                              <span>
+                                {isCardGenerating
+                                  ? "Generating..."
+                                  : prompt.imageUrl
+                                  ? "Regenerate"
+                                  : "Generate Image"}
+                              </span>
+                            </Button>
+
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => handleCopy(prompt.imagePrompt, prompt.id)}
                             >
                               {isCopied ? <Check size={12} /> : <Copy size={12} />}
-                              <span>{isCopied ? "Copied" : "Copy Prompt"}</span>
+                              <span>{isCopied ? "Copied" : "Copy"}</span>
                             </Button>
 
                             <Button
-                              variant={isAdded ? "outline" : "primary"}
+                              variant={isAdded ? "outline" : "secondary"}
                               size="sm"
                               disabled={isAdded}
                               onClick={() => handleAddToLibrary(prompt)}
                             >
                               {isAdded ? <Check size={12} /> : <Plus size={12} />}
-                              <span>{isAdded ? "Added to Library" : "Add to Library"}</span>
+                              <span>{isAdded ? "Saved" : "Save to Library"}</span>
                             </Button>
                           </div>
                         </div>
+
+                        {/* LIVE IMAGE PREVIEW (Rendered if generated) */}
+                        {prompt.imageUrl && (
+                          <div className="space-y-2 p-3 bg-surface-raised rounded-xl border border-border">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-[10px] uppercase font-bold text-foreground flex items-center gap-1.5">
+                                <Sparkles size={12} className="text-status-success" />
+                                <span>Live Cloudflare Workers AI Render</span>
+                              </span>
+                              <a
+                                href={prompt.imageUrl}
+                                download={`${prompt.title.replace(/\s+/g, "_")}.png`}
+                                className="flex items-center gap-1 text-[11px] font-mono text-muted hover:text-foreground transition-colors"
+                              >
+                                <Download size={12} />
+                                <span>Download PNG</span>
+                              </a>
+                            </div>
+                            <div className="relative rounded-lg overflow-hidden border border-border bg-black/40 flex items-center justify-center max-h-[420px]">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={prompt.imageUrl}
+                                alt={prompt.title}
+                                className="w-full h-auto object-contain max-h-[420px]"
+                              />
+                            </div>
+                          </div>
+                        )}
 
                         {/* Image Generation Prompt Box */}
                         <div className="space-y-1.5">
@@ -399,17 +620,17 @@ export function AiPromptAssistant({
                             <ImageIcon size={12} />
                             <span>IMAGE GENERATION PROMPT</span>
                           </span>
-                          <div className="p-3 bg-surface-strong border border-border rounded-lg font-mono text-xs text-foreground leading-relaxed selection:bg-foreground selection:text-background">
+                          <div className="p-3 bg-surface-raised border border-border rounded-lg font-mono text-xs text-foreground leading-relaxed selection:bg-foreground selection:text-background">
                             {prompt.imagePrompt}
                           </div>
                         </div>
 
-                        {/* Accompanying Social Caption */}
+                        {/* Social Caption */}
                         <div className="space-y-1.5">
                           <span className="font-mono text-[10px] uppercase tracking-wider text-muted font-semibold">
                             FACEBOOK CAPTION &amp; HASHTAGS
                           </span>
-                          <div className="p-3 bg-surface-strong border border-border rounded-lg text-xs text-foreground space-y-1.5">
+                          <div className="p-3 bg-surface-raised border border-border rounded-lg text-xs text-foreground space-y-1.5">
                             <p>{prompt.caption}</p>
                             <div className="flex flex-wrap gap-1 font-mono text-[10px] text-muted">
                               {prompt.hashtags.map((h) => (
@@ -417,32 +638,6 @@ export function AiPromptAssistant({
                               ))}
                             </div>
                           </div>
-                        </div>
-
-                        {/* Live Visual Graphic Preview Toggle */}
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={() => togglePreview(prompt.id)}
-                            className="flex items-center gap-1.5 text-xs font-mono text-muted hover:text-foreground transition-colors cursor-pointer"
-                          >
-                            <Layers size={13} />
-                            <span>
-                              {isPreviewOpen ? "Hide Visual Draft Preview" : "Preview Visual Draft Framing"}
-                            </span>
-                            {isPreviewOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          </button>
-
-                          {isPreviewOpen && (
-                            <div className="mt-3 max-w-sm mx-auto p-2 bg-surface-strong border border-border rounded-lg animate-fade-in">
-                              <PostGraphic
-                                title={prompt.title}
-                                aspect={prompt.aspect}
-                                category="AI SYNTHESIS // IMAGEN 3"
-                                variant={1}
-                              />
-                            </div>
-                          )}
                         </div>
                       </div>
                     );
@@ -460,19 +655,19 @@ export function AiPromptAssistant({
           </div>
         ))}
 
-        {/* Loading Indicator */}
+        {/* Active Generating Indicator */}
         {isGenerating && (
           <div className="flex gap-3 max-w-md mr-auto">
-            <div className="w-8 h-8 rounded-lg bg-surface-strong border border-border text-foreground flex items-center justify-center shrink-0 shadow-xs">
+            <div className="w-8 h-8 rounded-lg bg-surface-raised border border-border text-foreground flex items-center justify-center shrink-0 shadow-xs">
               <Bot size={16} />
             </div>
             <div className="p-4 bg-surface border border-border rounded-xl rounded-tl-none shadow-xs space-y-2 flex-1">
               <div className="flex items-center gap-2 text-xs font-mono text-foreground font-semibold">
                 <Loader2 size={14} className="animate-spin text-foreground" />
-                <span>Synthesizing Image Generation Prompts...</span>
+                <span>{activeGenerationMessage || "Running Cloudflare Workers AI..."}</span>
               </div>
               <p className="text-[11px] font-mono text-muted">
-                Calibrating lighting, aspect ratios, and social captions for {selectedModel}.
+                Invoking REST API on edge GPU inference clusters.
               </p>
             </div>
           </div>
@@ -482,18 +677,19 @@ export function AiPromptAssistant({
       </div>
 
       {/* Suggested Quick Inspiration Chips */}
-      <div className="px-4 py-2 border-t border-border bg-surface-strong/40 flex items-center gap-2 overflow-x-auto">
+      <div className="px-4 py-2 border-t border-border bg-surface-raised/50 flex items-center gap-2 overflow-x-auto">
         <span className="text-[10px] font-mono uppercase text-muted whitespace-nowrap">
-          Quick ideas:
+          Inspiration:
         </span>
         {PRESET_IDEAS.map((idea) => (
           <button
             key={idea.label}
             type="button"
-            onClick={() => handleSubmit(idea.prompt, idea.aspect)}
-            className="px-2.5 py-1 rounded-full bg-surface border border-border hover:border-foreground text-[11px] text-foreground font-mono transition-colors whitespace-nowrap cursor-pointer shadow-2xs"
+            onClick={() => handleDirectGenerateImage(idea.prompt, idea.aspect)}
+            className="px-2.5 py-1 rounded-full bg-surface border border-border hover:border-foreground text-[11px] text-foreground font-mono transition-colors whitespace-nowrap cursor-pointer shadow-2xs flex items-center gap-1.5"
           >
-            ✦ {idea.label} ({idea.aspect})
+            <Zap size={10} className="text-amber-500" />
+            <span>{idea.label}</span>
           </button>
         ))}
       </div>
@@ -503,11 +699,11 @@ export function AiPromptAssistant({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            handleSubmit();
+            handleDirectGenerateImage();
           }}
           className="space-y-2"
         >
-          <div className="relative flex items-end bg-surface-strong border border-border rounded-xl overflow-hidden focus-within:border-foreground transition-colors">
+          <div className="relative flex items-end bg-surface-raised border border-border rounded-xl overflow-hidden focus-within:border-foreground transition-colors">
             <textarea
               rows={2}
               value={inputQuery}
@@ -515,27 +711,38 @@ export function AiPromptAssistant({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  handleSubmit();
+                  handleDirectGenerateImage();
                 }
               }}
-              placeholder="Describe your visual concept (e.g., '3 carousel slides announcing our edge database release')..."
+              placeholder="Describe what you want to generate (e.g., 'Modern tropical Filipino villa with bamboo ceiling and warm lights')..."
               className="w-full p-3 bg-transparent text-xs sm:text-sm text-foreground placeholder:text-muted focus:outline-none resize-none font-mono leading-relaxed"
             />
 
             <div className="p-2 flex items-center gap-2 shrink-0">
               <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!inputQuery.trim() || isGenerating}
+                onClick={() => handleDraftPrompts()}
+                className="h-8 px-2.5 text-xs font-mono"
+              >
+                <span>Draft Prompts</span>
+              </Button>
+
+              <Button
                 type="submit"
                 variant="primary"
                 size="sm"
                 disabled={!inputQuery.trim() || isGenerating}
-                className="h-8 px-3"
+                className="h-8 px-3.5 bg-foreground text-background hover:bg-foreground/90"
               >
                 {isGenerating ? (
                   <Loader2 size={14} className="animate-spin" />
                 ) : (
                   <>
-                    <span>Generate</span>
-                    <Send size={13} />
+                    <Zap size={13} />
+                    <span>Generate Image</span>
                   </>
                 )}
               </Button>
@@ -543,8 +750,8 @@ export function AiPromptAssistant({
           </div>
 
           <div className="flex items-center justify-between text-[11px] font-mono text-muted px-1">
-            <span>Press Enter to generate, Shift+Enter for new line</span>
-            <span className="hidden sm:inline">Calibrated for Imagen 3 &amp; DALL·E 3</span>
+            <span>Press Enter to Generate Image immediately via Workers AI</span>
+            <span>Edge Inference: {MODEL_OPTIONS.find((m) => m.id === selectedModel)?.name || "Workers AI"}</span>
           </div>
         </form>
       </div>

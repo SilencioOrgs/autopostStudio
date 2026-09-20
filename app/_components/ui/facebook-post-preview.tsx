@@ -12,6 +12,7 @@ export interface FacebookPostPreviewProps {
   collection?: string;
   aspect?: "4:5" | "1:1" | "16:9";
   showImage?: boolean;
+  imageUrl?: string;
   modelBadge?: string;
   statusBadge?: string;
   className?: string;
@@ -24,7 +25,8 @@ export function FacebookPostPreview({
   hashtags = ["#StudioNine", "#AutomatedDesign", "#Editorial", "#SocialEngine"],
   aspect = "4:5",
   showImage = false,
-  modelBadge = "Rendered via Imagen 3",
+  imageUrl,
+  modelBadge = "Cloudflare Workers AI",
   statusBadge = "Approved",
   className = "",
 }: FacebookPostPreviewProps) {
@@ -66,12 +68,21 @@ export function FacebookPostPreview({
         )}
       </div>
 
-      {/* Embedded Graphic */}
-      {showImage && (
+      {/* Embedded Graphic / Real Image */}
+      {imageUrl ? (
+        <div className="mt-3.5 overflow-hidden rounded-lg border border-border bg-black/40 flex items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageUrl}
+            alt={caption || "Generated image"}
+            className="w-full h-auto object-cover max-h-[500px]"
+          />
+        </div>
+      ) : showImage ? (
         <div className="mt-3.5 overflow-hidden">
           <PostGraphic title={caption} aspect={aspect} />
         </div>
-      )}
+      ) : null}
 
       {/* Caption */}
       <p className="pt-3 text-body-sm text-foreground leading-relaxed break-words">

@@ -6,7 +6,7 @@ export interface PromptItem {
   caption: string;
   hashtags: string[];
   aspect: "4:5" | "1:1" | "16:9";
-  model: "imagen-3" | "gemini-2.5-flash" | "dall-e-3";
+  model: "cloudflare-workers-ai" | "gemini-2.5-flash" | "dall-e-3";
   status: "queued" | "generating" | "ready" | "scheduled" | "posted" | "failed";
   estimatedCost: string;
 }
@@ -20,7 +20,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Slow mornings call for deliberate rituals. Hand-poured Ethiopian Yirgacheffe notes of bergamot and jasmine now brewing at all roastery locations.",
     hashtags: ["#NorthlineCoffee", "#PourOverRitual", "#SpecialtyCoffee", "#CraftRoasters"],
     aspect: "4:5",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "ready",
     estimatedCost: "$0.03",
   },
@@ -32,7 +32,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Extracted for 18 hours at 4°C. Smooth chocolate undertones with zero acidity. Grab our ready-to-pour bottles in-store today.",
     hashtags: ["#ColdBrewCraft", "#NorthlineRoast", "#SingleOrigin", "#CoffeeLaboratory"],
     aspect: "1:1",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "scheduled",
     estimatedCost: "$0.03",
   },
@@ -44,7 +44,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "The environment shapes the output. Engineered for focus, zero distractions, and maximum developer flow.",
     hashtags: ["#StudioNine", "#WorkspaceDesign", "#MinimalDesk", "#IndustrialDesign"],
     aspect: "4:5",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "posted",
     estimatedCost: "$0.03",
   },
@@ -56,7 +56,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Sound engineering meets minimalist form. Previewing the acoustic series arriving late autumn.",
     hashtags: ["#AcousticDesign", "#StudioNineGear", "#IndustrialAesthetics"],
     aspect: "16:9",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "generating",
     estimatedCost: "$0.03",
   },
@@ -68,7 +68,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Form follows precision. Print edition 04 is currently in pre-press.",
     hashtags: ["#TypographyDaily", "#SwissDesign", "#PrintCraft"],
     aspect: "4:5",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "queued",
     estimatedCost: "$0.03",
   },
@@ -80,7 +80,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "From farm gate to cupping table. The fresh harvest from Huila, Colombia has cleared quality control.",
     hashtags: ["#DirectTrade", "#NorthlineOrigin", "#CuppingTable"],
     aspect: "4:5",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "failed",
     estimatedCost: "$0.03",
   },
@@ -92,7 +92,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Designing for 99.999% uptime requires thinking in distributed micro-clusters rather than monolithic relays.",
     hashtags: ["#SystemDesign", "#CloudInfrastructure", "#DevEngineering"],
     aspect: "16:9",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "ready",
     estimatedCost: "$0.03",
   },
@@ -104,7 +104,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Every millimeter of tactile travel matters. The obsidian edition goes into prototype validation this Friday.",
     hashtags: ["#MechanicalKeyboards", "#IndustrialDesign", "#DeskSetup"],
     aspect: "1:1",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "ready",
     estimatedCost: "$0.03",
   },
@@ -116,7 +116,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Dialed to 1:2.1 ratio at 9 bars. Crisp notes of dark cocoa, candied orange peel, and dried stone fruit.",
     hashtags: ["#EspressoObsession", "#NorthlineRoasters", "#SpecialtyCoffee"],
     aspect: "4:5",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "scheduled",
     estimatedCost: "$0.03",
   },
@@ -128,7 +128,7 @@ export const SEED_PROMPTS: PromptItem[] = [
     caption: "Low latency, instant feedback loops, zero cognitive friction. How our frontend team maintains velocity.",
     hashtags: ["#FrontendEngineering", "#DevTools", "#WebDev"],
     aspect: "4:5",
-    model: "imagen-3",
+    model: "cloudflare-workers-ai",
     status: "queued",
     estimatedCost: "$0.03",
   },

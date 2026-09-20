@@ -36,13 +36,9 @@ export const ERROR_CODES = {
   FB_TOKEN_MISMATCH: "The access token provided does not belong to the specified Page ID.",
   FB_RATE_LIMITED: "Meta Graph API rate limit reached. Please wait before retrying.",
 
-  // Google AI Studio / Gemini BYO Key
-  AI_KEY_MISSING: "No Google AI Studio key configured. Please add your key in Settings.",
-  AI_KEY_INVALID: "The provided Google AI Studio key is invalid or rejected by Google.",
-  AI_BILLING_REQUIRED: "Google AI Studio project requires active billing to generate images.",
-  AI_API_NOT_ENABLED: "The Generative Language API is not enabled on your Google Cloud project.",
-  AI_QUOTA_EXCEEDED: "Your Google AI Studio quota is exhausted. Generation resumes when your quota resets, or raise your limit in Google AI Studio.",
-  AI_REGION_UNSUPPORTED: "Google AI Studio is not available in the current region.",
+  // Cloudflare Workers AI
+  AI_PROVIDER_UNAVAILABLE: "Cloudflare image generation is not configured or temporarily unavailable.",
+  AI_QUOTA_EXCEEDED: "Cloudflare Workers AI is temporarily rate limited. Generation will resume automatically.",
 
   // Sheet Ingestion
   IMPORT_INVALID_FILE: "Only .xlsx and .csv files up to 5 MB are supported.",

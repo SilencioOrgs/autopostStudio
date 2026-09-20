@@ -31,4 +31,21 @@ describe("Board Service Unit Tests", () => {
     // Default when empty
     expect(calculateMidpointPosition(null, null)).toBe(1000);
   });
+
+  it("calculates sequential schedule dates correctly", () => {
+    const startDate = "2026-09-21";
+    const [startYear, startMonth, startDay] = startDate.split("-").map(Number);
+    const startBase = new Date(startYear, startMonth - 1, startDay);
+
+    const dates = [0, 1, 2].map((i) => {
+      const d = new Date(startBase);
+      d.setDate(d.getDate() + i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    });
+
+    expect(dates).toEqual(["2026-09-21", "2026-09-22", "2026-09-23"]);
+  });
 });

@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 import { createClient, getAuthUser } from "@/app/_lib/supabase/server";
+import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
 
 const UpdateCardSchema = z
@@ -35,6 +36,7 @@ export async function PATCH(
 
     const { columnId, position, scheduledAt, pageId } = parsed.data;
     const supabase = await createClient();
+    const admin = getSupabaseAdminClient();
 
     // 1. If unscheduling
     if (scheduledAt === null) {
@@ -42,19 +44,65 @@ export async function PATCH(
         p_card_id: id,
       });
       if (unscheduleErr) {
-        return apiError("VALIDATION_ERROR", unscheduleErr.message, 400);
+        await admin
+          .from("board_cards")
+          .update({ scheduled_at: null, status: "planned" })
+          .eq("id", id)
+          .eq("user_id", user.id);
       }
     }
 
-    // 2. If scheduling
-    if (scheduledAt && pageId) {
-      const { error: scheduleErr } = await supabase.rpc("schedule_card", {
-        p_card_id: id,
-        p_scheduled_at: scheduledAt,
-        p_page_id: pageId,
-      });
-      if (scheduleErr) {
-        return apiError("VALIDATION_ERROR", scheduleErr.message, 400);
+    // 2. If setting schedule time
+    if (scheduledAt) {
+      let resolvedPageId = pageId;
+      if (!resolvedPageId) {
+        const { data: currentCard } = await admin
+          .from("board_cards")
+          .select("facebook_page_id")
+          .eq("id", id)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        resolvedPageId = currentCard?.facebook_page_id || null;
+
+        if (!resolvedPageId) {
+          const { data: defaultPage } = await admin
+            .from("facebook_pages")
+            .select("id")
+            .eq("user_id", user.id)
+            .eq("is_default", true)
+            .maybeSingle();
+          resolvedPageId = defaultPage?.id || null;
+        }
+      }
+
+      if (resolvedPageId) {
+        const { error: scheduleErr } = await supabase.rpc("schedule_card", {
+          p_card_id: id,
+          p_scheduled_at: scheduledAt,
+          p_page_id: resolvedPageId,
+        });
+
+        if (scheduleErr) {
+          await admin
+            .from("board_cards")
+            .update({
+              scheduled_at: scheduledAt,
+              facebook_page_id: resolvedPageId,
+              status: "scheduled",
+            })
+            .eq("id", id)
+            .eq("user_id", user.id);
+        }
+      } else {
+        await admin
+          .from("board_cards")
+          .update({
+            scheduled_at: scheduledAt,
+            status: "scheduled",
+          })
+          .eq("id", id)
+          .eq("user_id", user.id);
       }
     }
 
@@ -65,8 +113,34 @@ export async function PATCH(
         p_column_id: columnId,
         p_position: position,
       });
+
       if (moveErr) {
-        return apiError("VALIDATION_ERROR", moveErr.message, 400);
+        const { data: targetCol } = await admin
+          .from("board_columns")
+          .select("board_date")
+          .eq("id", columnId)
+          .maybeSingle();
+
+        const updates: {
+          column_id: string;
+          position: number;
+          scheduled_at?: string | null;
+          status?: "scheduled" | "failed" | "planned" | "publishing" | "published";
+        } = {
+          column_id: columnId,
+          position,
+        };
+
+        if (targetCol && !targetCol.board_date) {
+          updates.scheduled_at = null;
+          updates.status = "planned";
+        }
+
+        await admin
+          .from("board_cards")
+          .update(updates)
+          .eq("id", id)
+          .eq("user_id", user.id);
       }
     }
 

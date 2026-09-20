@@ -1,6 +1,4 @@
-/**
- * Configuration and tunables for frontend mock mode.
- */
+/** Shared, non-secret image-generation configuration. */
 
 export interface ModelOption {
   id: string;
@@ -9,19 +7,24 @@ export interface ModelOption {
 }
 
 export const MODEL_OPTIONS: readonly ModelOption[] = [
-  // mock: verify against Google AI Studio docs in the backend phase
   {
-    id: "imagen-3.0-generate-002",
-    name: "Imagen 3 (Recommended)",
-    description: "High-fidelity photorealism • Optimized for commercial social graphics",
+    id: "@cf/black-forest-labs/flux-1-schnell",
+    name: "FLUX.1 Schnell",
+    description: "Fast, high-quality 12B parameter model (recommended)",
   },
-  // mock: verify against Google AI Studio docs in the backend phase
   {
-    id: "imagen-3.0-fast-generate-001",
-    name: "Imagen 3 Fast",
-    description: "Lower latency generation for rapid batch prototyping",
+    id: "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+    name: "Stable Diffusion XL",
+    description: "Classic SDXL for detailed, high-resolution images",
+  },
+  {
+    id: "@cf/bytedance/stable-diffusion-xl-lightning",
+    name: "SDXL Lightning",
+    description: "Optimised SDXL for fast generation",
   },
 ] as const;
+
+export const DEFAULT_IMAGE_MODEL = MODEL_OPTIONS[0].id;
 
 export const MOCK_CONFIG = {
   minDurationMs: 8000,

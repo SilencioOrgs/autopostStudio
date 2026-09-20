@@ -1,8 +1,8 @@
 import "server-only";
 import crypto from "crypto";
 import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
-import { decryptFromBytea } from "@/app/_lib/crypto";
-import { generateImage } from "@/app/_lib/ai/gemini";
+import { generateCloudflareImage } from "@/app/_lib/ai/cloudflare";
+import { DEFAULT_IMAGE_MODEL } from "@/app/_lib/mock-config";
 import type { Database } from "@/app/_lib/db/types";
 
 type JobRow = Database["public"]["Tables"]["jobs"]["Row"];
@@ -147,26 +147,7 @@ export async function executeGenerateImageJob(job: JobRow): Promise<void> {
     return;
   }
 
-  // 1. Fetch user's Google AI Studio key from provider_keys (strictly in-memory)
-  const { data: keyRecord } = await admin
-    .from("provider_keys")
-    .select("key_ciphertext, status")
-    .eq("user_id", userId)
-    .eq("provider", "google_ai_studio")
-    .single();
-
-  if (!keyRecord || keyRecord.status !== "valid") {
-    await admin
-      .from("jobs")
-      .update({ status: "failed", last_error: "User has no verified Google AI Studio key." })
-      .eq("id", job.id);
-    await admin.from("prompts").update({ status: "failed" }).eq("id", promptId);
-    return;
-  }
-
-  const apiKey = decryptFromBytea(keyRecord.key_ciphertext, `provider_keys:${job.user_id}`);
-
-  // 2. Fetch prompt and style preset
+  // 1. Fetch prompt and style preset. Cloudflare credentials are server-managed.
   const { data: prompt } = await admin
     .from("prompts")
     .select("*")
@@ -179,29 +160,45 @@ export async function executeGenerateImageJob(job: JobRow): Promise<void> {
   }
 
   // Fetch style preset from user profile or default
-  const { data: profile } = await admin
+  let profileModel: string | null = null;
+  const { data: profileWithModel, error: profileErr } = await admin
     .from("profiles")
-    .select("default_style_preset")
+    .select("default_style_preset, image_model")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
+
+  let resolvedProfile = profileWithModel;
+  if (profileErr) {
+    const { data: baseProfile } = await admin
+      .from("profiles")
+      .select("default_style_preset")
+      .eq("id", userId)
+      .maybeSingle();
+    resolvedProfile = baseProfile as typeof profileWithModel;
+  } else {
+    profileModel = profileWithModel?.image_model || null;
+  }
+
+  if (!profileModel) {
+    const { data: authData } = await admin.auth.admin.getUserById(userId);
+    profileModel = (authData?.user?.user_metadata?.image_model as string | undefined) || null;
+  }
 
   const systemInstruction =
-    prompt.style || profile?.default_style_preset || "Modern architectural photography, photorealistic, 8k";
+    prompt.style || resolvedProfile?.default_style_preset || "Modern architectural photography, photorealistic, 8k";
 
   const generationId = crypto.randomUUID();
-  const modelName = "imagen-3.0-generate-002";
+  const modelName = profileModel || DEFAULT_IMAGE_MODEL;
 
   // Mark prompt generating
   await admin.from("prompts").update({ status: "generating" }).eq("id", promptId);
 
   try {
-    // 3. Call Gemini image generation
-    const result = await generateImage({
+    // 2. Call Cloudflare Workers AI REST API directly. No user-supplied provider key is used.
+    const result = await generateCloudflareImage({
       prompt: prompt.image_prompt,
       systemInstruction,
       aspect: prompt.aspect || "4:5",
-      imageSize: "1K",
-      apiKey,
       model: modelName,
     });
 
@@ -224,7 +221,7 @@ export async function executeGenerateImageJob(job: JobRow): Promise<void> {
       user_id: userId,
       prompt_id: promptId,
       job_id: job.id,
-      model: modelName,
+      model: result.model,
       system_instruction: systemInstruction,
       aspect: prompt.aspect || "4:5",
       image_size: "1K",
@@ -265,7 +262,7 @@ export async function executeGenerateImageJob(job: JobRow): Promise<void> {
           locked_at: null,
           locked_by: null,
           run_after: resumeTime,
-          last_error: "User quota exhausted. Scheduled auto-resume in 15 minutes.",
+          last_error: "Cloudflare Workers AI is temporarily rate limited. Scheduled auto-resume in 15 minutes.",
         })
         .eq("user_id", userId)
         .in("status", ["queued", "running"]);

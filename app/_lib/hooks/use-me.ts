@@ -22,17 +22,14 @@ export interface MeData {
     token_status: string;
     is_default: boolean;
   }>;
-  providerKey: {
-    id: string;
-    provider: string;
-    key_last4: string;
-    status: string;
-  } | null;
+  imageProvider: string;
   counts: {
     prompts: number;
     generating: number;
     ready: number;
+    backlog?: number;
     scheduled: number;
+    boardTotal?: number;
     published: number;
   };
 }
@@ -49,9 +46,9 @@ const fetcher = async (url: string): Promise<MeData> => {
 };
 
 export function useMe() {
-  const { data, isLoading, error } = useSWR<MeData>("/api/me", fetcher, {
+  const { data, isLoading, error, mutate } = useSWR<MeData>("/api/me", fetcher, {
     dedupingInterval: 5_000,
   });
 
-  return { data, isLoading, error };
+  return { data, isLoading, error, mutate };
 }

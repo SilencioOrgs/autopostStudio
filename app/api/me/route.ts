@@ -26,20 +26,15 @@ export async function GET() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
-    // Fetch Provider Keys (exclude ciphertext)
-    const { data: providerKey } = await supabase
-      .from("provider_keys")
-      .select("id, provider, key_last4, status, last_verified_at, created_at, updated_at")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
     // Query real stage counts
     const [
       { count: promptsCount },
       { count: generatingCount },
       { count: readyCount },
+      { count: backlogCount },
       { count: scheduledCount },
-      { count: publishedCount },
+      { count: publishedPostsCount },
+      { count: publishedCardsCount },
     ] = await Promise.all([
       supabase.from("prompts").select("*", { count: "exact", head: true }).eq("user_id", user.id),
       supabase
@@ -56,13 +51,28 @@ export async function GET() {
         .from("board_cards")
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
+        .eq("status", "planned"),
+      supabase
+        .from("board_cards")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
         .eq("status", "scheduled"),
       supabase
         .from("posts")
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
         .eq("status", "published"),
+      supabase
+        .from("board_cards")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("status", "published"),
     ]);
+
+    const finalPublished = Math.max(publishedPostsCount || 0, publishedCardsCount || 0);
+    const finalScheduled = scheduledCount || 0;
+    const finalBacklog = backlogCount || 0;
+    const finalBoardTotal = finalScheduled + finalBacklog;
 
     return apiSuccess({
       user: {
@@ -83,14 +93,16 @@ export async function GET() {
         default_style_preset: null,
       },
       pages: pages || [],
-      providerKey: providerKey || null,
+      imageProvider: "cloudflare",
       onboardingCompleted: Boolean(profile?.onboarding_completed_at),
       counts: {
         prompts: promptsCount || 0,
         generating: generatingCount || 0,
         ready: readyCount || 0,
-        scheduled: scheduledCount || 0,
-        published: publishedCount || 0,
+        backlog: finalBacklog,
+        scheduled: finalScheduled,
+        boardTotal: finalBoardTotal,
+        published: finalPublished,
       },
     });
   } catch (err: unknown) {

@@ -57,7 +57,6 @@ export function DashboardHeader({
   const defaultPage = meData?.pages?.find((p) => p.is_default) || meData?.pages?.[0];
   const userInitial = meData?.user?.email?.charAt(0).toUpperCase() || "U";
   const userEmail = meData?.user?.email || "Account";
-  const hasKey = Boolean(meData?.providerKey);
 
   return (
     <header className="h-16 bg-surface/80 backdrop-blur-md border-b border-border px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30">
@@ -111,16 +110,12 @@ export function DashboardHeader({
           </Link>
         )}
 
-        {/* AI Key Status indicator */}
+        {/* AI Status indicator */}
         <div className="hidden md:flex items-center gap-2 text-xs font-mono text-muted bg-surface-raised/60 px-2.5 py-1 rounded-md border border-border">
-          <span className={`relative flex h-2 w-2`}>
-            <span
-              className={`inline-flex rounded-full h-2 w-2 ${
-                hasKey ? "bg-status-success" : "bg-status-warning animate-pulse"
-              }`}
-            />
+          <span className="relative flex h-2 w-2">
+            <span className="inline-flex rounded-full h-2 w-2 bg-status-success" />
           </span>
-          <span>{hasKey ? "AI Engine Ready" : "AI Key Not Configured"}</span>
+          <span>Cloudflare Workers AI</span>
         </div>
       </div>
 

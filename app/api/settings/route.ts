@@ -3,6 +3,9 @@ import { z } from "zod";
 import { createClient, getAuthUser } from "@/app/_lib/supabase/server";
 import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
+import { MODEL_OPTIONS, DEFAULT_IMAGE_MODEL } from "@/app/_lib/mock-config";
+
+const validModelIds = MODEL_OPTIONS.map((m) => m.id);
 
 const UpdateSettingsSchema = z
   .object({
@@ -10,6 +13,9 @@ const UpdateSettingsSchema = z
     boardDays: z.number().int().min(7).max(30).optional(),
     defaultStylePreset: z.string().max(500).optional(),
     generationPaused: z.boolean().optional(),
+    imageModel: z.string().refine((v) => validModelIds.includes(v), {
+      message: "Invalid image model",
+    }).optional(),
   })
   .strict();
 
@@ -22,25 +28,42 @@ export async function GET() {
 
     const supabase = await createClient();
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("daily_post_cap, board_days, default_style_preset, generation_paused")
-      .eq("id", user.id)
-      .single();
+    let profileData: {
+      daily_post_cap?: number;
+      board_days?: number;
+      default_style_preset?: string | null;
+      generation_paused?: boolean;
+      image_model?: string | null;
+    } | null = null;
 
-    const { data: providerKey } = await supabase
-      .from("provider_keys")
-      .select("provider, key_last4, status, last_verified_at")
-      .eq("user_id", user.id)
-      .eq("provider", "google_ai_studio")
+    // Try selecting with image_model column
+    const { data: profileWithModel, error: selectErr } = await supabase
+      .from("profiles")
+      .select("daily_post_cap, board_days, default_style_preset, generation_paused, image_model")
+      .eq("id", user.id)
       .maybeSingle();
 
+    if (selectErr) {
+      // Column might not exist in database yet; fallback to query without it
+      const { data: baseProfile } = await supabase
+        .from("profiles")
+        .select("daily_post_cap, board_days, default_style_preset, generation_paused")
+        .eq("id", user.id)
+        .maybeSingle();
+      profileData = baseProfile;
+    } else {
+      profileData = profileWithModel;
+    }
+
+    const metadataModel = user.user_metadata?.image_model as string | undefined;
+    const resolvedModel = profileData?.image_model || metadataModel || DEFAULT_IMAGE_MODEL;
+
     return apiSuccess({
-      dailyPostCap: profile?.daily_post_cap ?? 3,
-      boardDays: profile?.board_days ?? 14,
-      defaultStylePreset: profile?.default_style_preset ?? "Modern architectural photography, photorealistic, 8k, natural lighting",
-      generationPaused: profile?.generation_paused ?? false,
-      providerKey: providerKey || null,
+      dailyPostCap: profileData?.daily_post_cap ?? 3,
+      boardDays: profileData?.board_days ?? 14,
+      defaultStylePreset: profileData?.default_style_preset ?? "Modern architectural photography, photorealistic, 8k, natural lighting",
+      generationPaused: profileData?.generation_paused ?? false,
+      imageModel: resolvedModel,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Failed to load settings";
@@ -71,30 +94,83 @@ export async function PATCH(request: NextRequest) {
       board_days?: number;
       default_style_preset?: string;
       generation_paused?: boolean;
+      image_model?: string;
     } = {};
 
     if (data.dailyPostCap !== undefined) updatePayload.daily_post_cap = data.dailyPostCap;
     if (data.boardDays !== undefined) updatePayload.board_days = data.boardDays;
     if (data.defaultStylePreset !== undefined) updatePayload.default_style_preset = data.defaultStylePreset.trim();
     if (data.generationPaused !== undefined) updatePayload.generation_paused = data.generationPaused;
+    if (data.imageModel !== undefined) updatePayload.image_model = data.imageModel;
 
     const admin = getSupabaseAdminClient();
-    const { data: updatedProfile, error } = await admin
-      .from("profiles")
-      .update(updatePayload)
-      .eq("id", user.id)
-      .select("daily_post_cap, board_days, default_style_preset, generation_paused")
-      .single();
 
-    if (error || !updatedProfile) {
-      return apiError("INTERNAL_ERROR", error?.message || "Failed to update settings", 500);
+    // Persist imageModel to user_metadata as resilient fallback
+    if (data.imageModel) {
+      await admin.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          ...(user.user_metadata || {}),
+          image_model: data.imageModel,
+        },
+      });
     }
 
+    let updatedProfile: {
+      daily_post_cap?: number;
+      board_days?: number;
+      default_style_preset?: string | null;
+      generation_paused?: boolean;
+      image_model?: string | null;
+    } | null = null;
+
+    if (Object.keys(updatePayload).length > 0) {
+      const { data: result, error: updateErr } = await admin
+        .from("profiles")
+        .update(updatePayload)
+        .eq("id", user.id)
+        .select("daily_post_cap, board_days, default_style_preset, generation_paused, image_model")
+        .maybeSingle();
+
+      if (updateErr) {
+        // If update failed (e.g. image_model column missing), retry without image_model
+        const { image_model: _omitted, ...safePayload } = updatePayload;
+        if (Object.keys(safePayload).length > 0) {
+          const { data: fallbackResult, error: fallbackErr } = await admin
+            .from("profiles")
+            .update(safePayload)
+            .eq("id", user.id)
+            .select("daily_post_cap, board_days, default_style_preset, generation_paused")
+            .maybeSingle();
+
+          if (fallbackErr) {
+            return apiError("INTERNAL_ERROR", fallbackErr.message, 500);
+          }
+          updatedProfile = fallbackResult;
+        } else {
+          const { data: existingProfile } = await admin
+            .from("profiles")
+            .select("daily_post_cap, board_days, default_style_preset, generation_paused")
+            .eq("id", user.id)
+            .maybeSingle();
+          updatedProfile = existingProfile;
+        }
+      } else {
+        updatedProfile = result;
+      }
+    }
+
+    const resolvedModel =
+      updatedProfile?.image_model ||
+      data.imageModel ||
+      (user.user_metadata?.image_model as string | undefined) ||
+      DEFAULT_IMAGE_MODEL;
+
     return apiSuccess({
-      dailyPostCap: updatedProfile.daily_post_cap,
-      boardDays: updatedProfile.board_days,
-      defaultStylePreset: updatedProfile.default_style_preset,
-      generationPaused: updatedProfile.generation_paused,
+      dailyPostCap: updatedProfile?.daily_post_cap ?? 3,
+      boardDays: updatedProfile?.board_days ?? 14,
+      defaultStylePreset: updatedProfile?.default_style_preset ?? "Modern architectural photography, photorealistic, 8k, natural lighting",
+      generationPaused: updatedProfile?.generation_paused ?? false,
+      imageModel: resolvedModel,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Failed to save settings";

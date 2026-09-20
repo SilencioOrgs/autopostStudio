@@ -33,6 +33,8 @@ const ServerEnvSchema = z.object({
   CRON_SECRET: z
     .string()
     .min(32, "CRON_SECRET must be at least 32 characters"),
+  CLOUDFLARE_ACCOUNT_ID: z.string().default(""),
+  CLOUDFLARE_API_TOKEN: z.string().default(""),
   GRAPH_API_VERSION: z
     .string()
     .regex(/^v\d+\.\d+$/, "GRAPH_API_VERSION must match vN.N (e.g. v26.0)")
@@ -60,6 +62,8 @@ export function getServerEnv(): ServerEnv {
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
     CRON_SECRET: process.env.CRON_SECRET,
+    CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+    CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
     GRAPH_API_VERSION: process.env.GRAPH_API_VERSION,
     NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
   });
@@ -93,4 +97,20 @@ export function getGraphApiVersion(): string {
 
 export function getSiteUrl(): string {
   return getServerEnv().NEXT_PUBLIC_SITE_URL;
+}
+
+export function getCloudflareAccountId(): string {
+  const id = getServerEnv().CLOUDFLARE_ACCOUNT_ID;
+  if (!id) {
+    throw new Error("CLOUDFLARE_ACCOUNT_ID is not configured");
+  }
+  return id;
+}
+
+export function getCloudflareApiToken(): string {
+  const token = getServerEnv().CLOUDFLARE_API_TOKEN;
+  if (!token) {
+    throw new Error("CLOUDFLARE_API_TOKEN is not configured");
+  }
+  return token;
 }

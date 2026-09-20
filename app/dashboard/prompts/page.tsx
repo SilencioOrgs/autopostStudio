@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useRef, useState } from "react";
+import Link from "next/link";
 import useSWR from "swr";
 import {
+  Zap,
   Sparkles,
   Layers,
   Upload,
@@ -16,6 +18,9 @@ import {
   FolderOpen,
   SlidersHorizontal,
   Loader2,
+  ArrowDownAZ,
+  ArrowDownUp,
+  ArrowUpAZ,
 } from "lucide-react";
 import { StatusBadge } from "@/_components/status-badge";
 import { Button } from "@/_components/ui/button";
@@ -57,6 +62,51 @@ const fetcher = <T,>(url: string): Promise<T> =>
   });
 
 const PAGE_SIZE = 25;
+type SortField = "number" | "name" | "style" | "status" | "created";
+type SortDirection = "asc" | "desc";
+
+const sortLabels: Record<SortField, string> = {
+  number: "#",
+  name: "Name",
+  style: "Style",
+  status: "Status",
+  created: "Newest",
+};
+
+function SortHeader({
+  field,
+  label,
+  activeField,
+  direction,
+  onSort,
+}: {
+  field: SortField;
+  label: string;
+  activeField: SortField;
+  direction: SortDirection;
+  onSort: (field: SortField) => void;
+}) {
+  const isActive = activeField === field;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(field)}
+      aria-label={`${label} — ${isActive ? (direction === "asc" ? "ascending" : "descending") : "sort"}`}
+      aria-pressed={isActive}
+      className={`inline-flex items-center gap-1 rounded px-1 -mx-1 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
+        isActive ? "text-foreground" : ""
+      }`}
+    >
+      <span>{label}</span>
+      {isActive ? (
+        direction === "asc" ? <ArrowUpAZ size={13} aria-hidden="true" /> : <ArrowDownAZ size={13} aria-hidden="true" />
+      ) : (
+        <ArrowDownUp size={12} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
 
 export default function PromptLibraryPage() {
   const { addToast } = useToast();
@@ -70,17 +120,26 @@ export default function PromptLibraryPage() {
   const [activeSetId, setActiveSetId] = useState<string>("all");
   const [activeStatus, setActiveStatus] = useState<string>("all");
   const [page, setPage] = useState(1);
+  const [sortField, setSortField] = useState<SortField>("created");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // SWR queries
   const promptsUrl = `/api/prompts?status=${activeStatus}&setId=${
     activeSetId !== "all" ? activeSetId : ""
-  }&q=${encodeURIComponent(searchQuery)}&page=${page}&limit=${PAGE_SIZE}`;
+  }&q=${encodeURIComponent(searchQuery)}&sort=${sortField}&direction=${sortDirection}&page=${page}&limit=${PAGE_SIZE}`;
   const {
     data: promptsData,
     isLoading: isPromptsLoading,
     mutate: mutatePrompts,
-  } = useSWR<{ prompts: PromptRecord[]; total: number }>(promptsUrl, fetcher);
+  } = useSWR<{ prompts: PromptRecord[]; total: number }>(promptsUrl, fetcher, {
+    refreshInterval: (data) => {
+      const hasPending = data?.prompts?.some(
+        (p) => p.status === "queued" || p.status === "generating"
+      );
+      return hasPending ? 2000 : 0;
+    },
+  });
 
   const { data: promptSets = [], mutate: mutateSets } = useSWR<PromptSetRecord[]>(
     "/api/prompt-sets",
@@ -125,6 +184,17 @@ export default function PromptLibraryPage() {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
+  };
+
+  const changeSort = (field: SortField) => {
+    if (field === sortField) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection(field === "created" ? "desc" : "asc");
+    }
+    setPage(1);
+    setSelectedIds([]);
   };
 
   // Handler: Import File
@@ -249,10 +319,14 @@ export default function PromptLibraryPage() {
       setSelectedIds([]);
       await mutatePrompts();
       addToast({
-        title: "Batch Enqueued",
-        description: `Dispatched ${json.data.enqueued} prompts to the generation worker.`,
+        title: "Generation Started",
+        description: `Dispatched ${json.data.enqueued} prompts to Cloudflare Workers AI. Rendering now...`,
         variant: "success",
       });
+
+      // Quick follow-up revalidation to capture status transitions
+      setTimeout(() => mutatePrompts(), 1200);
+      setTimeout(() => mutatePrompts(), 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to queue prompts";
       addToast({ title: "Queue Dispatch Failed", description: msg, variant: "error" });
@@ -307,7 +381,7 @@ export default function PromptLibraryPage() {
             Prompt Studio &amp; Library
           </h1>
           <p className="text-sm text-muted mt-1 font-mono">
-            Import Excel workbooks (.xlsx/.csv), manage prompts, and dispatch batches to the Google AI Studio generation pipeline.
+            Import Excel workbooks (.xlsx/.csv), craft prompts with AI, and dispatch batches to the Cloudflare Workers AI generation pipeline.
           </p>
         </div>
 
@@ -399,6 +473,27 @@ export default function PromptLibraryPage() {
               />
             </div>
 
+            <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-mono text-muted">
+              <span className="whitespace-nowrap">Sort by</span>
+              <select
+                value={`${sortField}:${sortDirection}`}
+                onChange={(event) => {
+                  const [field, direction] = event.target.value.split(":") as [SortField, SortDirection];
+                  setSortField(field);
+                  setSortDirection(direction);
+                  setPage(1);
+                  setSelectedIds([]);
+                }}
+                className="min-w-0 bg-transparent text-foreground focus:outline-none"
+                aria-label="Sort prompt library"
+              >
+                {(Object.keys(sortLabels) as SortField[]).flatMap((field) => [
+                  <option key={`${field}-asc`} value={`${field}:asc`}>{sortLabels[field]}: A–Z / low to high</option>,
+                  <option key={`${field}-desc`} value={`${field}:desc`}>{sortLabels[field]}: Z–A / high to low</option>,
+                ])}
+              </select>
+            </label>
+
             {/* Batch Action Toolbar when items selected */}
             {selectedIds.length > 0 && (
               <div className="flex items-center gap-2 bg-surface-strong border border-border px-3 py-1.5 rounded-lg text-xs font-mono animate-fade-in">
@@ -471,13 +566,13 @@ export default function PromptLibraryPage() {
             /* Main Grid: Filters & Table */
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* Left Filter Sidebar */}
-              <aside className="lg:col-span-3 bg-surface rounded-xl border border-border p-4 sm:p-5 space-y-5 shadow-xs">
+              <aside className="lg:col-span-3 lg:sticky lg:top-20 bg-surface rounded-xl border border-border p-4 sm:p-5 space-y-5 shadow-xs">
                 <div>
                   <h2 className="text-xs font-mono uppercase tracking-wider text-muted mb-3 flex items-center justify-between">
                     <span>Prompt Collections</span>
                     <FolderOpen size={14} className="text-muted" />
                   </h2>
-                  <div className="space-y-1">
+                  <div className="max-h-64 space-y-1 overflow-y-auto overscroll-contain pr-1">
                     <button
                       type="button"
                         onClick={() => {
@@ -574,12 +669,12 @@ export default function PromptLibraryPage() {
                             className="rounded border-border accent-foreground cursor-pointer h-4 w-4"
                           />
                         </th>
-                        <th className="p-3 w-16">#</th>
-                        <th className="p-3 w-36">Style / Set</th>
-                        <th className="p-3 min-w-[240px]">Image Prompt</th>
+                        <th className="p-3 w-16"><SortHeader field="number" label="#" activeField={sortField} direction={sortDirection} onSort={changeSort} /></th>
+                        <th className="p-3 w-36"><SortHeader field="style" label="Style / Set" activeField={sortField} direction={sortDirection} onSort={changeSort} /></th>
+                        <th className="p-3 min-w-[240px]"><SortHeader field="name" label="Image Prompt" activeField={sortField} direction={sortDirection} onSort={changeSort} /></th>
                         <th className="p-3 min-w-[200px]">Caption &amp; Hashtags</th>
                         <th className="p-3 w-16">Aspect</th>
-                        <th className="p-3 w-28">Status</th>
+                        <th className="p-3 w-28"><SortHeader field="status" label="Status" activeField={sortField} direction={sortDirection} onSort={changeSort} /></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border text-xs">
@@ -643,7 +738,27 @@ export default function PromptLibraryPage() {
                                 </span>
                               </td>
                               <td className="p-3">
-                                <StatusBadge status={row.status} size="sm" />
+                                <div className="flex flex-col items-start gap-1">
+                                  <StatusBadge status={row.status} size="sm" />
+                                  {row.status === "ready" && (
+                                    <Link
+                                      href="/dashboard/review"
+                                      className="text-[10px] font-mono text-accent-ready hover:underline whitespace-nowrap"
+                                    >
+                                      Review Image →
+                                    </Link>
+                                  )}
+                                  {row.status === "generating" && (
+                                    <span className="text-[10px] font-mono text-accent-generate font-semibold animate-pulse flex items-center gap-1 whitespace-nowrap">
+                                      <Loader2 size={10} className="animate-spin" /> Rendering...
+                                    </span>
+                                  )}
+                                  {row.status === "queued" && (
+                                    <span className="text-[10px] font-mono text-muted whitespace-nowrap">
+                                      In queue...
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           );
