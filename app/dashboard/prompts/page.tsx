@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useRef, useState } from "react";
 import useSWR from "swr";
 import {
   Sparkles,
@@ -21,6 +21,7 @@ import { StatusBadge } from "@/_components/status-badge";
 import { Button } from "@/_components/ui/button";
 import { Dialog } from "@/_components/ui/dialog";
 import { EmptyState } from "@/_components/ui/empty-state";
+import { Pagination } from "@/_components/ui/pagination";
 import { useToast } from "@/_components/ui/toast";
 import { AiPromptAssistant } from "@/_components/ai/ai-prompt-assistant";
 import type { ApiResponse } from "@/app/_lib/errors";
@@ -55,6 +56,8 @@ const fetcher = <T,>(url: string): Promise<T> =>
     return json.data;
   });
 
+const PAGE_SIZE = 25;
+
 export default function PromptLibraryPage() {
   const { addToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,12 +69,13 @@ export default function PromptLibraryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSetId, setActiveSetId] = useState<string>("all");
   const [activeStatus, setActiveStatus] = useState<string>("all");
+  const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // SWR queries
   const promptsUrl = `/api/prompts?status=${activeStatus}&setId=${
     activeSetId !== "all" ? activeSetId : ""
-  }&q=${encodeURIComponent(searchQuery)}`;
+  }&q=${encodeURIComponent(searchQuery)}&page=${page}&limit=${PAGE_SIZE}`;
   const {
     data: promptsData,
     isLoading: isPromptsLoading,
@@ -386,7 +390,10 @@ export default function PromptLibraryPage() {
               <input
                 type="search"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full h-9 pl-9 pr-3 bg-surface border border-border rounded-lg text-xs text-foreground placeholder:text-muted/60 focus:outline-none focus:border-foreground transition-colors font-mono"
                 placeholder="Search prompts by text, style, or #tag..."
               />
@@ -473,7 +480,10 @@ export default function PromptLibraryPage() {
                   <div className="space-y-1">
                     <button
                       type="button"
-                      onClick={() => setActiveSetId("all")}
+                        onClick={() => {
+                          setActiveSetId("all");
+                          setPage(1);
+                        }}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer ${
                         activeSetId === "all"
                           ? "bg-surface-strong text-foreground font-semibold border border-border"
@@ -489,7 +499,10 @@ export default function PromptLibraryPage() {
                       <button
                         key={set.id}
                         type="button"
-                        onClick={() => setActiveSetId(set.id)}
+                        onClick={() => {
+                          setActiveSetId(set.id);
+                          setPage(1);
+                        }}
                         className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer ${
                           activeSetId === set.id
                             ? "bg-surface-strong text-foreground font-semibold border border-border"
@@ -527,7 +540,10 @@ export default function PromptLibraryPage() {
                       <button
                         key={s.slug}
                         type="button"
-                        onClick={() => setActiveStatus(s.slug)}
+                        onClick={() => {
+                          setActiveStatus(s.slug);
+                          setPage(1);
+                        }}
                         className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
                           activeStatus === s.slug
                             ? "bg-surface-strong text-foreground font-semibold border border-border"
@@ -636,6 +652,16 @@ export default function PromptLibraryPage() {
                     </tbody>
                   </table>
                 </div>
+                {(promptsData?.total || 0) > PAGE_SIZE && (
+                  <div className="border-t border-border">
+                    <Pagination
+                      page={page}
+                      totalItems={promptsData?.total || 0}
+                      pageSize={PAGE_SIZE}
+                      onPageChange={setPage}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}
