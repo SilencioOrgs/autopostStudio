@@ -8,6 +8,7 @@ import { Icon } from "@/_design-system/icons";
 import { FacebookIcon } from "@/_components/ui/icons";
 import { Button } from "@/_components/ui/button";
 import { ThemeToggle } from "@/_components/ui/theme-toggle";
+import { useMe } from "@/_lib/hooks/use-me";
 
 interface DashboardHeaderProps {
   onOpenMobileNav?: () => void;
@@ -16,52 +17,15 @@ interface DashboardHeaderProps {
   followerCount?: string;
 }
 
-interface UserMeData {
-  user: {
-    id: string;
-    email?: string;
-  };
-  pages: Array<{
-    id: string;
-    page_id: string;
-    page_name: string;
-    followers_count: number;
-    token_status: string;
-    is_default: boolean;
-  }>;
-  providerKey: {
-    id: string;
-    provider: string;
-    key_last4: string;
-    status: string;
-  } | null;
-}
-
 export function DashboardHeader({
   onOpenMobileNav,
   onOpenCommand,
 }: DashboardHeaderProps) {
   const router = useRouter();
-  const [meData, setMeData] = useState<UserMeData | null>(null);
+  const { data: meData } = useMe();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-    fetch("/api/me")
-      .then((res) => res.json())
-      .then((res) => {
-        if (isMounted && res.ok && res.data) {
-          setMeData(res.data);
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   // Close menu on outside click
   useEffect(() => {

@@ -1,67 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Icon } from "@/_design-system/icons";
 import { Button } from "@/_components/ui/button";
 import { FacebookIcon } from "@/_components/ui/icons";
 import { getTimeOfDayGreeting } from "@/_lib/dates";
-
-interface MeData {
-  user: {
-    id: string;
-    email?: string;
-  };
-  profile: {
-    username?: string | null;
-    email: string;
-  };
-  pages: Array<{
-    id: string;
-    page_id: string;
-    page_name: string;
-    followers_count: number;
-    token_status: string;
-    is_default: boolean;
-  }>;
-  providerKey: {
-    id: string;
-    provider: string;
-    key_last4: string;
-    status: string;
-  } | null;
-  counts: {
-    prompts: number;
-    generating: number;
-    ready: number;
-    scheduled: number;
-    published: number;
-  };
-}
+import { useMe } from "@/_lib/hooks/use-me";
 
 export default function DashboardPage() {
   const greeting = getTimeOfDayGreeting();
-  const [data, setData] = useState<MeData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let isMounted = true;
-    fetch("/api/me")
-      .then((res) => res.json())
-      .then((res) => {
-        if (isMounted && res.ok && res.data) {
-          setData(res.data);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const { data, isLoading: loading } = useMe();
 
   const counts = data?.counts || {
     prompts: 0,

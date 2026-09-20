@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/_design-system/icons";
 import { navItems } from "@/_design-system/tokens";
 import { Tooltip } from "@/_components/ui/tooltip";
+import { useMe } from "@/_lib/hooks/use-me";
 
 interface SidebarProps {
   onClose?: () => void;
@@ -16,6 +17,7 @@ interface SidebarProps {
 export function Sidebar({ onClose, className = "", onOpenCommand }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { data: meData, isLoading: isMeLoading, error: meError } = useMe();
 
   // Load collapsed preference from localStorage if available
   useEffect(() => {
@@ -135,6 +137,24 @@ export function Sidebar({ onClose, className = "", onOpenCommand }: SidebarProps
         {/* Navigation Links */}
         <nav className="p-2 space-y-1 overflow-y-auto flex-1" aria-label="Dashboard Navigation">
           {navItems.map((item) => {
+            const badge =
+              isMeLoading || meError
+                ? null
+                : {
+                    "/dashboard/prompts": meData?.counts.prompts,
+                    "/dashboard/queue": meData?.counts.generating,
+                    "/dashboard/review": meData?.counts.ready,
+                    "/dashboard/schedule": meData?.counts.scheduled,
+                    "/dashboard/posts": meData?.counts.published,
+                  }[item.href] ?? null;
+            const badgeVariant =
+              item.href === "/dashboard/queue"
+                ? "warn"
+                : item.href === "/dashboard/review"
+                  ? "ready"
+                  : item.href === "/dashboard/schedule"
+                    ? "schedule"
+                    : null;
             const isActive =
               item.href === "/dashboard"
                 ? pathname === "/dashboard"
@@ -160,19 +180,19 @@ export function Sidebar({ onClose, className = "", onOpenCommand }: SidebarProps
                 {!collapsed && (
                   <>
                     <span className="truncate flex-1">{item.label}</span>
-                    {item.badge && (
+                    {badge !== null && (
                       <span
                         className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full font-medium ${
-                          item.badgeVariant === "warn"
+                          badgeVariant === "warn"
                             ? "bg-status-warning/15 text-status-warning"
-                            : item.badgeVariant === "ready"
+                            : badgeVariant === "ready"
                             ? "bg-status-success/15 text-status-success"
-                            : item.badgeVariant === "schedule"
+                            : badgeVariant === "schedule"
                             ? "bg-status-info/15 text-status-info"
                             : "bg-surface-raised text-muted border border-border"
                         }`}
                       >
-                        {item.badge}
+                        {badge}
                       </span>
                     )}
                   </>
@@ -182,7 +202,7 @@ export function Sidebar({ onClose, className = "", onOpenCommand }: SidebarProps
 
             if (collapsed) {
               return (
-                <Tooltip key={item.href} content={`${item.label}${item.badge ? ` (${item.badge})` : ""}`} side="right">
+                <Tooltip key={item.href} content={`${item.label}${badge !== null ? ` (${badge})` : ""}`} side="right">
                   {linkContent}
                 </Tooltip>
               );
