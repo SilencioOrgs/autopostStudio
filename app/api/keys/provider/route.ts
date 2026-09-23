@@ -1,4 +1,3 @@
-import { type NextRequest } from "next/server";
 import { getAuthUser } from "@/app/_lib/supabase/server";
 import { apiError } from "@/app/_lib/errors";
 
@@ -12,10 +11,10 @@ async function unavailable() {
   );
 }
 
-export async function POST(_request: NextRequest) {
+export async function POST() {
   return unavailable();
 }
 
-export async function DELETE(_request: NextRequest) {
+export async function DELETE() {
   return unavailable();
 }

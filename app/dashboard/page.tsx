@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
-import { Loader2, Send, Calendar, ExternalLink } from "lucide-react";
+import { Loader2, Send, ExternalLink } from "lucide-react";
 import { Icon } from "@/_design-system/icons";
 import { Button } from "@/_components/ui/button";
 import { FacebookIcon } from "@/_components/ui/icons";

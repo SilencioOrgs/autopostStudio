@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
 import { generateCloudflareImage } from "@/app/_lib/ai/cloudflare";
 import { DEFAULT_IMAGE_MODEL } from "@/app/_lib/mock-config";
+import { decryptPageToken, publishPostToFacebook } from "@/app/_lib/services/facebook";
 import type { Database } from "@/app/_lib/db/types";
 
 type JobRow = Database["public"]["Tables"]["jobs"]["Row"];
@@ -13,6 +14,70 @@ export interface WorkerTickResult {
   succeeded: number;
   failed: number;
   pausedUsers: string[];
+  publishedPosts: number;
+  failedPosts: number;
+}
+
+async function publishDuePosts(limit = 5) {
+  const admin = getSupabaseAdminClient();
+  const { data: candidates, error } = await admin
+    .from("posts")
+    .select("id")
+    .eq("status", "scheduled")
+    .lte("scheduled_publish_time", new Date().toISOString())
+    .order("scheduled_publish_time", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error("Could not find due posts");
+
+  let published = 0;
+  let failed = 0;
+  for (const candidate of candidates || []) {
+    // Compare-and-set is the idempotency guard: only one worker can own a post.
+    const { data: post } = await admin
+      .from("posts")
+      .update({ status: "publishing", last_attempt_at: new Date().toISOString() })
+      .eq("id", candidate.id)
+      .eq("status", "scheduled")
+      .select("*")
+      .maybeSingle();
+    if (!post) continue;
+
+    try {
+      if (!post.facebook_page_id || !post.generation_id) throw new Error("Missing publication data");
+      const [{ data: page }, { data: generation }] = await Promise.all([
+        admin.from("facebook_pages").select("*").eq("id", post.facebook_page_id).eq("user_id", post.user_id).maybeSingle(),
+        admin.from("generations").select("storage_path").eq("id", post.generation_id).eq("user_id", post.user_id).maybeSingle(),
+      ]);
+      if (!page || page.token_status !== "valid" || !generation?.storage_path) throw new Error("Missing active page or image");
+      const { data: file, error: downloadError } = await admin.storage.from("generated-images").download(generation.storage_path);
+      if (downloadError || !file) throw new Error("Image unavailable");
+      const result = await publishPostToFacebook({
+        pageId: page.page_id,
+        token: decryptPageToken(page.token_ciphertext, post.user_id),
+        message: post.caption_final || "Published via AutoPost Studio",
+        imageBuffer: Buffer.from(await file.arrayBuffer()),
+        imageMimeType: file.type || "image/png",
+        scheduledPublishTime: null,
+      });
+      await admin.from("posts").update({
+        status: "published", published_at: result.publishedAt || new Date().toISOString(),
+        fb_post_id: result.fbPostId, fb_photo_id: result.fbPhotoId, fb_mode: "immediate",
+        publish_attempts: post.publish_attempts + 1, error_code: null, error_message: null,
+      }).eq("id", post.id).eq("status", "publishing");
+      if (post.card_id) await admin.from("board_cards").update({ status: "published" }).eq("id", post.card_id);
+      if (post.prompt_id) await admin.from("prompts").update({ status: "posted" }).eq("id", post.prompt_id);
+      published++;
+    } catch (cause) {
+      console.error("Scheduled publication failed", { postId: post.id, cause });
+      await admin.from("posts").update({
+        status: "failed", publish_attempts: post.publish_attempts + 1,
+        error_code: "PUBLISH_FAILED", error_message: "Publication failed. Retry from Posts after checking your Page connection.",
+      }).eq("id", post.id).eq("status", "publishing");
+      if (post.card_id) await admin.from("board_cards").update({ status: "failed" }).eq("id", post.card_id);
+      failed++;
+    }
+  }
+  return { published, failed };
 }
 
 /**
@@ -20,44 +85,9 @@ export interface WorkerTickResult {
  */
 export async function reapStuckJobs(): Promise<number> {
   const admin = getSupabaseAdminClient();
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-
-  // Find stuck jobs
-  const { data: stuckJobs } = await admin
-    .from("jobs")
-    .select("id, attempts, max_attempts")
-    .eq("status", "running")
-    .lt("locked_at", tenMinutesAgo);
-
-  if (!stuckJobs || stuckJobs.length === 0) return 0;
-
-  let reaped = 0;
-  for (const job of stuckJobs) {
-    const nextAttempts = job.attempts + 1;
-    if (nextAttempts >= job.max_attempts) {
-      await admin
-        .from("jobs")
-        .update({
-          status: "failed",
-          last_error: "Job timed out in running state and exceeded max retry attempts.",
-        })
-        .eq("id", job.id);
-    } else {
-      await admin
-        .from("jobs")
-        .update({
-          status: "queued",
-          attempts: nextAttempts,
-          locked_at: null,
-          locked_by: null,
-          run_after: new Date(Date.now() + 5000).toISOString(),
-        })
-        .eq("id", job.id);
-    }
-    reaped++;
-  }
-
-  return reaped;
+  const { data, error } = await admin.rpc("reap_stuck_jobs");
+  if (error) throw new Error("Could not reap stuck jobs");
+  return Number(data ?? 0);
 }
 
 /**
@@ -65,69 +95,13 @@ export async function reapStuckJobs(): Promise<number> {
  */
 export async function claimJobs(batchSize = 5, workerId: string): Promise<JobRow[]> {
   const admin = getSupabaseAdminClient();
-  const now = new Date().toISOString();
-
-  // 1. Check which users have generation_paused = true
-  const { data: pausedProfiles } = await admin
-    .from("profiles")
-    .select("id")
-    .eq("generation_paused", true);
-
-  const pausedUserIds = new Set((pausedProfiles || []).map((p) => p.id));
-
-  // 2. Fetch candidates ready to run
-  const { data: candidates } = await admin
-    .from("jobs")
-    .select("*")
-    .eq("status", "queued")
-    .lte("run_after", now)
-    .order("priority", { ascending: false })
-    .order("created_at", { ascending: true })
-    .limit(batchSize * 3);
-
-  if (!candidates || candidates.length === 0) return [];
-
-  // Filter out jobs for paused users or exceeding per-user concurrency cap (3)
-  const eligibleJobIds: string[] = [];
-  const userRunningCounts = new Map<string, number>();
-
-  // Count active running jobs per user
-  const { data: runningJobs } = await admin
-    .from("jobs")
-    .select("user_id")
-    .eq("status", "running");
-
-  (runningJobs || []).forEach((j) => {
-    userRunningCounts.set(j.user_id, (userRunningCounts.get(j.user_id) || 0) + 1);
+  const { data, error } = await admin.rpc("claim_jobs", {
+    p_worker: workerId,
+    p_batch: Math.min(Math.max(batchSize, 1), 10),
+    p_per_user: 3,
   });
-
-  for (const job of candidates) {
-    if (pausedUserIds.has(job.user_id)) continue;
-
-    const currentRunning = userRunningCounts.get(job.user_id) || 0;
-    if (currentRunning >= 3) continue; // per-user concurrency cap
-
-    eligibleJobIds.push(job.id);
-    userRunningCounts.set(job.user_id, currentRunning + 1);
-
-    if (eligibleJobIds.length >= batchSize) break;
-  }
-
-  if (eligibleJobIds.length === 0) return [];
-
-  // Atomically lock eligible jobs
-  const { data: claimed } = await admin
-    .from("jobs")
-    .update({
-      status: "running",
-      locked_at: now,
-      locked_by: workerId,
-    })
-    .in("id", eligibleJobIds)
-    .eq("status", "queued") // concurrency check
-    .select();
-
-  return claimed || [];
+  if (error) throw new Error("Could not claim generation jobs");
+  return (data || []) as JobRow[];
 }
 
 /**
@@ -252,9 +226,8 @@ export async function executeGenerateImageJob(job: JobRow): Promise<void> {
     // Handle 429 Quota Exhaustion
     if (errorStatus === 429 || errorCode === "AI_QUOTA_EXCEEDED") {
       // Pause this user's queue and reschedule pending jobs for +15 min
-      await admin.from("profiles").update({ generation_paused: true }).eq("id", userId);
-
       const resumeTime = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      await admin.from("profiles").update({ generation_paused_until: resumeTime }).eq("id", userId);
       await admin
         .from("jobs")
         .update({
@@ -342,11 +315,15 @@ export async function runWorkerTick(workerId: string, limit = 5): Promise<Worker
     }
   }
 
+  const postResult = await publishDuePosts(limit);
+
   return {
     reapedJobs,
     processedJobs: claimed.length,
     succeeded,
     failed,
     pausedUsers: [],
+    publishedPosts: postResult.published,
+    failedPosts: postResult.failed,
   };
 }

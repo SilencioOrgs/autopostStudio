@@ -2,14 +2,27 @@ import { type NextRequest } from "next/server";
 import crypto from "crypto";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
 import { runWorkerTick } from "@/app/_lib/services/queue";
+import { getCronSecret } from "@/app/_lib/env";
 
-export async function POST(request: NextRequest) {
+export const maxDuration = 60;
+
+function hasValidCronSecret(request: NextRequest) {
+  let expected: string;
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
+    expected = getCronSecret();
+  } catch {
+    return false;
+  }
+  const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/, "") ?? "";
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(supplied);
+  return expectedBuffer.length === suppliedBuffer.length && crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
+}
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return apiError("AUTH_UNAUTHORIZED", "Unauthorized: Invalid cron worker bearer token.", 401);
+async function tick(request: NextRequest) {
+  try {
+    if (!hasValidCronSecret(request)) {
+      return apiError("AUTH_UNAUTHORIZED", "Unauthorized.", 401);
     }
 
     const workerId = `worker-${crypto.randomUUID().slice(0, 8)}`;
@@ -21,7 +34,10 @@ export async function POST(request: NextRequest) {
       ...result,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Worker tick execution failed";
-    return apiError("INTERNAL_ERROR", msg, 500);
+    console.error("Worker tick failed", err);
+    return apiError("INTERNAL_ERROR", undefined, 500);
   }
 }
+
+export async function POST(request: NextRequest) { return tick(request); }
+export async function GET(request: NextRequest) { return tick(request); }

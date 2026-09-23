@@ -16,7 +16,6 @@ import {
   ExternalLink,
   Eye,
   CheckCheck,
-  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/_components/ui/button";
 import { Dialog } from "@/_components/ui/dialog";
@@ -86,7 +85,7 @@ export default function ReviewPage() {
   const [drawerCaption, setDrawerCaption] = useState("");
   const [drawerHashtags, setDrawerHashtags] = useState("");
   const [drawerPreviewMode, setDrawerPreviewMode] = useState<"asset" | "feed">("feed");
-  const [isDrawerSaving, setIsDrawerSaving] = useState(false);
+  const [isDrawerSaving] = useState(false);
 
   // Zoom lightbox modal for image thumbnail
   const [zoomedImage, setZoomedImage] = useState<{

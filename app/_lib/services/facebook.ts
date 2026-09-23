@@ -5,6 +5,11 @@ import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
 
 export const GRAPH_API_VERSION = getGraphApiVersion();
 const GRAPH_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+const GRAPH_TIMEOUT_MS = 10_000;
+
+function graphHeaders(token: string) {
+  return { Authorization: `Bearer ${token}` };
+}
 
 export interface FacebookPageVerificationResult {
   valid: boolean;
@@ -78,8 +83,10 @@ export async function verifyFacebookCredentials(
 
   try {
     // 1. Fetch Page info
-    const pageUrl = `${GRAPH_BASE_URL}/${encodeURIComponent(cleanId)}?fields=id,name,category,followers_count&access_token=${encodeURIComponent(cleanToken)}`;
-    const pageRes = await fetch(pageUrl, { method: "GET" });
+    const pageUrl = `${GRAPH_BASE_URL}/${encodeURIComponent(cleanId)}?fields=id,name,category,followers_count`;
+    const pageRes = await fetch(pageUrl, {
+      method: "GET", headers: graphHeaders(cleanToken), signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+    });
     const pageData = await pageRes.json();
 
     if (!pageRes.ok || pageData.error) {
@@ -97,8 +104,10 @@ export async function verifyFacebookCredentials(
     }
 
     // 2. Fetch permissions to verify publishing capability
-    const permUrl = `${GRAPH_BASE_URL}/me/permissions?access_token=${encodeURIComponent(cleanToken)}`;
-    const permRes = await fetch(permUrl, { method: "GET" });
+    const permUrl = `${GRAPH_BASE_URL}/me/permissions`;
+    const permRes = await fetch(permUrl, {
+      method: "GET", headers: graphHeaders(cleanToken), signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+    });
     const permData = await permRes.json();
 
     if (permRes.ok && Array.isArray(permData.data)) {
@@ -108,13 +117,9 @@ export async function verifyFacebookCredentials(
           .map((p: { permission: string }) => p.permission)
       );
 
-      // Check for pages_manage_posts or pages_show_list or pages_read_engagement
-      const hasPublishPerm =
-        activePermissions.has("pages_manage_posts") ||
-        activePermissions.has("pages_show_list") ||
-        activePermissions.has("pages_read_engagement");
+      const hasPublishPerm = activePermissions.has("pages_manage_posts");
 
-      if (!hasPublishPerm && activePermissions.size > 0) {
+      if (!hasPublishPerm) {
         return {
           valid: false,
           pageId: cleanId,

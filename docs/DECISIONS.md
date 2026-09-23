@@ -18,3 +18,7 @@
 - **Decision 5 (Phase 1): Step Definitions & Mock Configuration**: Unified onboarding and setup steps in `_lib/steps.ts`. Created `_lib/mock-config.ts` for AI models and generation configuration.
 - **Decision 6 (Phase 1): Stub Routes & Navigation**: Created stub routes for `/dashboard/review`, `/dashboard/schedule`, `/dashboard/posts`, `/dashboard/settings`, `/login`, `/privacy`, `/terms`, `not-found.tsx`, and `dashboard/error.tsx` so all navigation links resolve cleanly without 404s.
 - **Decision 7 (Phase 1): Layout Structure**: Extracted `DashboardShell` to coordinate sidebar, top header, mobile drawer navigation, and footer cleanly across all dashboard sub-routes without duplicate footers or layout shift.
+# Runtime safety follow-up (2026-09-20)
+
+- Generation is eligible only from `draft` or `failed`; the `enqueue_generation_prompts` RPC atomically queues it so refreshes and double-clicks cannot spend twice.
+- The scheduler is the only global worker caller. Due posts are claimed with a compare-and-set transition before publishing, then their card and prompt move to `published` / `posted`.

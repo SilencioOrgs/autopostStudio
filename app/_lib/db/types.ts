@@ -702,6 +702,12 @@ export type Database = {
         };
         Returns: number;
       };
+      enqueue_generation_prompts: {
+        Args: {
+          p_prompt_ids: string[];
+        };
+        Returns: Json;
+      };
     };
     Enums: {
       [_ in never]: never;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient, getAuthUser } from "@/app/_lib/supabase/server";
 import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
+import { requireSameOrigin } from "@/app/_lib/api-security";
 
 const UpdateCardSchema = z
   .object({
@@ -18,6 +19,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
     const user = await getAuthUser();
     if (!user) {
       return apiError("AUTH_UNAUTHORIZED", "Please sign in.", 401);
@@ -44,11 +47,8 @@ export async function PATCH(
         p_card_id: id,
       });
       if (unscheduleErr) {
-        await admin
-          .from("board_cards")
-          .update({ scheduled_at: null, status: "planned" })
-          .eq("id", id)
-          .eq("user_id", user.id);
+        console.error("Could not unschedule card", unscheduleErr);
+        return apiError("VALIDATION_ERROR", "This post could not be unscheduled. Refresh and try again.", 409);
       }
     }
 
@@ -76,7 +76,15 @@ export async function PATCH(
         }
       }
 
-      if (resolvedPageId) {
+      if (!resolvedPageId) {
+        return apiError("PAGE_NOT_CONNECTED", "Connect a valid Facebook Page before scheduling.", 400);
+      }
+      {
+        const scheduledDate = new Date(scheduledAt);
+        const now = Date.now();
+        if (!Number.isFinite(scheduledDate.getTime()) || scheduledDate.getTime() < now + 15 * 60 * 1000 || scheduledDate.getTime() > now + 30 * 24 * 60 * 60 * 1000) {
+          return apiError("SCHEDULE_WINDOW_INVALID", "Choose a time from 15 minutes to 30 days from now.", 400);
+        }
         const { error: scheduleErr } = await supabase.rpc("schedule_card", {
           p_card_id: id,
           p_scheduled_at: scheduledAt,
@@ -84,25 +92,9 @@ export async function PATCH(
         });
 
         if (scheduleErr) {
-          await admin
-            .from("board_cards")
-            .update({
-              scheduled_at: scheduledAt,
-              facebook_page_id: resolvedPageId,
-              status: "scheduled",
-            })
-            .eq("id", id)
-            .eq("user_id", user.id);
+          console.error("Could not schedule card", scheduleErr);
+          return apiError("VALIDATION_ERROR", "This post could not be scheduled. Check the page, time, and daily limit.", 409);
         }
-      } else {
-        await admin
-          .from("board_cards")
-          .update({
-            scheduled_at: scheduledAt,
-            status: "scheduled",
-          })
-          .eq("id", id)
-          .eq("user_id", user.id);
       }
     }
 
@@ -115,32 +107,8 @@ export async function PATCH(
       });
 
       if (moveErr) {
-        const { data: targetCol } = await admin
-          .from("board_columns")
-          .select("board_date")
-          .eq("id", columnId)
-          .maybeSingle();
-
-        const updates: {
-          column_id: string;
-          position: number;
-          scheduled_at?: string | null;
-          status?: "scheduled" | "failed" | "planned" | "publishing" | "published";
-        } = {
-          column_id: columnId,
-          position,
-        };
-
-        if (targetCol && !targetCol.board_date) {
-          updates.scheduled_at = null;
-          updates.status = "planned";
-        }
-
-        await admin
-          .from("board_cards")
-          .update(updates)
-          .eq("id", id)
-          .eq("user_id", user.id);
+        console.error("Could not move card", moveErr);
+        return apiError("VALIDATION_ERROR", "This card could not be moved. Refresh and try again.", 409);
       }
     }
 
@@ -158,16 +126,18 @@ export async function PATCH(
 
     return apiSuccess(updatedCard);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to update card";
-    return apiError("INTERNAL_ERROR", msg, 500);
+    console.error("Card update failed", err);
+    return apiError("INTERNAL_ERROR", undefined, 500);
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
     const user = await getAuthUser();
     if (!user) {
       return apiError("AUTH_UNAUTHORIZED", "Please sign in.", 401);

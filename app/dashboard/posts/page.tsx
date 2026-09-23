@@ -224,6 +224,8 @@ export default function PostsPage() {
                       <td className="p-3 pl-4">
                         <div className="w-12 h-14 rounded overflow-hidden border border-border bg-surface-raised flex-shrink-0">
                           {post.imageUrl ? (
+                            // Signed storage URLs cannot be optimized by Next's image loader.
+                            // eslint-disable-next-line @next/next/no-img-element
                             <img src={post.imageUrl} alt={caption} className="h-full w-full object-cover" />
                           ) : (
                             <PostGraphic title={caption} />

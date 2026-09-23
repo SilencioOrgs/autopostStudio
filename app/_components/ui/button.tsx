@@ -68,6 +68,10 @@ export function Button({
     </>
   );
 
+  if (!children && !props["aria-label"]) {
+    throw new Error("Icon-only Button requires an aria-label");
+  }
+
   if (href && !disabled && !loading) {
     return (
       <Link href={href} className={combinedClasses} role="button">

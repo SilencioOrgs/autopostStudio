@@ -23,16 +23,13 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   Calendar,
-  Clock,
   Layers,
   AlertTriangle,
   Loader2,
   Trash2,
   GripVertical,
   Plus,
-  ExternalLink,
   Check,
-  ArrowRight,
   Send,
 } from "lucide-react";
 import { Button } from "@/_components/ui/button";
@@ -887,13 +884,28 @@ export default function SchedulePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cardIds }),
       });
-      const json: ApiResponse<{ publishedCount: number; failedCount: number; pageName: string }> =
+      const json: ApiResponse<{
+        publishedCount: number;
+        failedCount: number;
+        pageName: string;
+        results: Array<{ cardId: string; success: boolean }>;
+      }> =
         await res.json();
       if (!json.ok) {
         throw new Error(json.error?.message || "Batch publish failed");
       }
 
       setSelectedBacklogIds(new Set());
+      const publishedIds = new Set(
+        json.data.results.filter((result) => result.success).map((result) => result.cardId)
+      );
+      // Remove confirmed posts immediately; the revalidation below keeps every tab in sync.
+      mutate(
+        (current) => current
+          ? { ...current, cards: current.cards.filter((card) => !publishedIds.has(card.id)) }
+          : current,
+        false
+      );
       await mutate();
       addToast({
         title: "Published to Facebook!",

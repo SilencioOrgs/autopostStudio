@@ -1,4 +1,3 @@
-import { type NextRequest } from "next/server";
 import crypto from "crypto";
 import { getAuthUser } from "@/app/_lib/supabase/server";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
@@ -8,7 +7,7 @@ import { runWorkerTick } from "@/app/_lib/services/queue";
  * POST /api/queue/process
  * Authenticated endpoint allowing the dashboard UI to trigger immediate processing of queued generation jobs.
  */
-export async function POST(_request: NextRequest) {
+export async function POST() {
   try {
     const user = await getAuthUser();
     if (!user) {

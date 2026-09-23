@@ -3,15 +3,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
   Sparkles,
-  Send,
   Copy,
   Check,
   Plus,
   Image as ImageIcon,
   Bot,
   Loader2,
-  ChevronDown,
-  ChevronUp,
   Download,
   Zap,
 } from "lucide-react";

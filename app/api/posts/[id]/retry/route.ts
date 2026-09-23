@@ -3,12 +3,15 @@ import { createClient, getAuthUser } from "@/app/_lib/supabase/server";
 import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
 import { decryptPageToken, publishPostToFacebook } from "@/app/_lib/services/facebook";
+import { requireSameOrigin } from "@/app/_lib/api-security";
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
     const user = await getAuthUser();
     if (!user) {
       return apiError("AUTH_UNAUTHORIZED", "Please sign in.", 401);
@@ -29,13 +32,26 @@ export async function POST(
       return apiError("NOT_FOUND", "Post record not found.", 404);
     }
 
-    let page = null;
     const admin = getSupabaseAdminClient();
-    if (post.facebook_page_id) {
+    if (post.status !== "failed") {
+      return apiError("VALIDATION_ERROR", "Only failed posts can be retried.", 409);
+    }
+    if (post.publish_attempts >= 5) {
+      return apiError("VALIDATION_ERROR", "This post reached the retry limit. Reconnect the Page and create a new schedule.", 409);
+    }
+    const { data: claimed } = await admin
+      .from("posts")
+      .update({ status: "publishing", last_attempt_at: new Date().toISOString() })
+      .eq("id", id).eq("user_id", user.id).eq("status", "failed")
+      .select("*").maybeSingle();
+    if (!claimed) return apiError("VALIDATION_ERROR", "This post is already being processed.", 409);
+
+    let page = null;
+    if (claimed.facebook_page_id) {
       const { data: pageData } = await admin
         .from("facebook_pages")
         .select("*")
-        .eq("id", post.facebook_page_id)
+        .eq("id", claimed.facebook_page_id)
         .eq("user_id", user.id)
         .maybeSingle();
       page = pageData;
@@ -50,11 +66,11 @@ export async function POST(
     }
 
     let generation = null;
-    if (post.generation_id) {
+    if (claimed.generation_id) {
       const { data: genData } = await supabase
         .from("generations")
         .select("*")
-        .eq("id", post.generation_id)
+        .eq("id", claimed.generation_id)
         .maybeSingle();
       generation = genData;
     }
@@ -81,14 +97,14 @@ export async function POST(
       const result = await publishPostToFacebook({
         pageId: page.page_id,
         token,
-        message: post.caption_final || "Published via AutoPost Studio",
+        message: claimed.caption_final || "Published via AutoPost Studio",
         imageBuffer,
         imageMimeType: fileData.type || "image/png",
         scheduledPublishTime: null,
       });
 
       // 4. Update post row to published
-      await supabase
+      await admin
         .from("posts")
         .update({
           fb_post_id: result.fbPostId,
@@ -97,15 +113,18 @@ export async function POST(
           status: "published",
           error_code: null,
           error_message: null,
+          publish_attempts: claimed.publish_attempts + 1,
+          fb_mode: "immediate",
         })
-        .eq("id", id);
+        .eq("id", id).eq("status", "publishing");
 
-      if (post.prompt_id) {
-        await supabase
+      if (claimed.prompt_id) {
+        await admin
           .from("prompts")
           .update({ status: "posted" })
-          .eq("id", post.prompt_id);
+          .eq("id", claimed.prompt_id);
       }
+      if (claimed.card_id) await admin.from("board_cards").update({ status: "published" }).eq("id", claimed.card_id);
 
       return apiSuccess({
         published: true,
@@ -114,19 +133,21 @@ export async function POST(
         message: "Post successfully published to Facebook!",
       });
     } catch (fbErr: unknown) {
-      const msg = fbErr instanceof Error ? fbErr.message : "Publishing to Facebook failed";
-      await supabase
+      console.error("Post retry failed", fbErr);
+      await admin
         .from("posts")
         .update({
           status: "failed",
-          error_message: msg,
+          error_code: "PUBLISH_FAILED",
+          error_message: "Publication failed. Check the Page connection and retry.",
+          publish_attempts: claimed.publish_attempts + 1,
         })
-        .eq("id", id);
+        .eq("id", id).eq("status", "publishing");
 
-      return apiError("INTERNAL_ERROR", msg, 500);
+      return apiError("INTERNAL_ERROR", undefined, 503);
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Retry failed";
-    return apiError("INTERNAL_ERROR", msg, 500);
+    console.error("Post retry failed", err);
+    return apiError("INTERNAL_ERROR", undefined, 500);
   }
 }

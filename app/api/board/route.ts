@@ -22,6 +22,7 @@ export async function GET() {
         "*, prompts(*), generations(*), facebook_pages(id, page_id, page_name, category, followers_count, token_last4, token_status)"
       )
       .eq("user_id", user.id)
+      .neq("status", "published")
       .order("position", { ascending: true });
 
     if (cardsError) {

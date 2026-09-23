@@ -35,10 +35,11 @@ Apply migrations to your Supabase project in sequential order:
 1. `supabase/migrations/20260919000001_init.sql` (baseline schema, tables, initial RLS)
 2. `supabase/migrations/20260919000002_hardening_1.sql` (integrity constraints, indexes, triggers)
 3. `supabase/migrations/20260919000003_hardening_2.sql` (privilege hardening, atomic RPC functions)
+4. `supabase/migrations/20260920000004_runtime_safety.sql` (duplicate-generation guard, publishing states, and queue RPC)
 
 ### Worker & Scheduler Setup
 
-The generation queue and Facebook publishing worker are triggered via `GET` or `POST` to `/api/worker/tick` with `Authorization: Bearer <CRON_SECRET>`.
+The generation queue and Facebook publishing worker are triggered via `GET` or `POST` to `/api/worker/tick` with `Authorization: Bearer <CRON_SECRET>`. The endpoint fails closed when the secret is not configured.
 - **Supabase pg_cron (Recommended)**: Follow `supabase/manual/schedule_worker.sql` to configure `pg_cron` and `pg_net` to trigger the worker every minute.
 - **Vercel Cron (Alternative)**: Configure `cron` schedules in `vercel.json` pointing to `/api/worker/tick`.
 

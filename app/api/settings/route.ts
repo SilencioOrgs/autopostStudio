@@ -133,7 +133,18 @@ export async function PATCH(request: NextRequest) {
 
       if (updateErr) {
         // If update failed (e.g. image_model column missing), retry without image_model
-        const { image_model: _omitted, ...safePayload } = updatePayload;
+        const safePayload: Omit<typeof updatePayload, "image_model"> = {
+          ...(updatePayload.daily_post_cap !== undefined
+            ? { daily_post_cap: updatePayload.daily_post_cap }
+            : {}),
+          ...(updatePayload.board_days !== undefined ? { board_days: updatePayload.board_days } : {}),
+          ...(updatePayload.default_style_preset !== undefined
+            ? { default_style_preset: updatePayload.default_style_preset }
+            : {}),
+          ...(updatePayload.generation_paused !== undefined
+            ? { generation_paused: updatePayload.generation_paused }
+            : {}),
+        };
         if (Object.keys(safePayload).length > 0) {
           const { data: fallbackResult, error: fallbackErr } = await admin
             .from("profiles")

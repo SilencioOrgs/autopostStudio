@@ -38,10 +38,10 @@ export async function GET() {
     ] = await Promise.all([
       supabase.from("prompts").select("*", { count: "exact", head: true }).eq("user_id", user.id),
       supabase
-        .from("generations")
+        .from("prompts")
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
-        .in("status", ["pending", "running"]),
+        .in("status", ["queued", "generating"]),
       supabase
         .from("prompts")
         .select("*", { count: "exact", head: true })
@@ -106,7 +106,7 @@ export async function GET() {
       },
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to load user profile";
-    return apiError("INTERNAL_ERROR", msg, 500);
+    console.error("Failed to load user profile", err);
+    return apiError("INTERNAL_ERROR", undefined, 500);
   }
 }

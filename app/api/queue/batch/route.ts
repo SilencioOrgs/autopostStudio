@@ -1,18 +1,19 @@
 import { type NextRequest } from "next/server";
 import { z } from "zod";
-import crypto from "crypto";
 import { createClient, getAuthUser } from "@/app/_lib/supabase/server";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
-import { runWorkerTick } from "@/app/_lib/services/queue";
+import { requireSameOrigin } from "@/app/_lib/api-security";
 
 const EnqueueBatchSchema = z
   .object({
-    promptIds: z.array(z.string().uuid()).min(1, "At least one prompt ID is required"),
+    promptIds: z.array(z.string().uuid()).min(1, "At least one prompt ID is required").max(100, "Select no more than 100 prompts"),
   })
   .strict();
 
 export async function POST(request: NextRequest) {
   try {
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
     const user = await getAuthUser();
     if (!user) return apiError("AUTH_UNAUTHORIZED", "Please sign in to enqueue generation.", 401);
 
@@ -23,52 +24,24 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) return apiError("VALIDATION_ERROR", parsed.error.issues[0].message, 400);
 
     const supabase = await createClient();
-    const { data: prompts } = await supabase
-      .from("prompts")
-      .select("id")
-      .in("id", parsed.data.promptIds)
-      .eq("user_id", user.id);
-
-    if (!prompts || prompts.length === 0) {
-      return apiError("NOT_FOUND", "No eligible prompts found to enqueue.", 404);
-    }
-
-    const validPromptIds = prompts.map((prompt) => prompt.id);
-    const now = new Date().toISOString();
-    const jobsToInsert = validPromptIds.map((promptId) => ({
-      id: crypto.randomUUID(),
-      user_id: user.id,
-      type: "generate_image" as const,
-      payload: { prompt_id: promptId, user_id: user.id },
-      status: "queued" as const,
-      priority: 0,
-      attempts: 0,
-      max_attempts: 3,
-      run_after: now,
-      created_at: now,
-    }));
-
-    const { error: jobsError } = await supabase.from("jobs").insert(jobsToInsert);
-    if (jobsError) return apiError("INTERNAL_ERROR", jobsError.message, 500);
-
-    await supabase
-      .from("prompts")
-      .update({ status: "queued" })
-      .in("id", validPromptIds)
-      .eq("user_id", user.id);
-
-    // Auto-trigger worker execution in background so jobs run immediately
-    const workerId = `worker-${crypto.randomUUID().slice(0, 8)}`;
-    runWorkerTick(workerId, 5).catch((err) => {
-      console.error("Auto worker tick failed:", err);
+    const { data: result, error } = await supabase.rpc("enqueue_generation_prompts", {
+      p_prompt_ids: parsed.data.promptIds,
     });
+    if (error) {
+      console.error("Could not enqueue generation prompts", error);
+      return apiError("VALIDATION_ERROR", "Only draft or failed prompts can be queued. Apply the runtime safety migration if this persists.", 409);
+    }
+    const summary = result as { queued?: number; skipped?: number } | null;
 
     return apiSuccess({
-      enqueued: validPromptIds.length,
-      message: `Enqueued ${validPromptIds.length} prompts for Cloudflare image generation.`,
+      enqueued: summary?.queued ?? 0,
+      skipped: summary?.skipped ?? 0,
+      message: summary?.queued
+        ? `Enqueued ${summary.queued} prompt${summary.queued === 1 ? "" : "s"} for image generation.`
+        : "Nothing was queued. Generated, queued, scheduled, and posted prompts are protected from duplicate generation.",
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to enqueue batch";
-    return apiError("INTERNAL_ERROR", msg, 500);
+    console.error("Queue batch failed", err);
+    return apiError("INTERNAL_ERROR", undefined, 500);
   }
 }

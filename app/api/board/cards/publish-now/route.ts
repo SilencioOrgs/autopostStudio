@@ -4,13 +4,16 @@ import { getAuthUser } from "@/app/_lib/supabase/server";
 import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
 import { decryptPageToken, publishPostToFacebook } from "@/app/_lib/services/facebook";
+import { requireSameOrigin } from "@/app/_lib/api-security";
 
 const BatchPublishSchema = z.object({
-  cardIds: z.array(z.string().uuid()).min(1, "Select at least one card to publish"),
-});
+  cardIds: z.array(z.string().uuid()).min(1, "Select at least one card to publish").max(100),
+}).strict();
 
 export async function POST(request: NextRequest) {
   try {
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
     const user = await getAuthUser();
     if (!user) {
       return apiError("AUTH_UNAUTHORIZED", "Please sign in.", 401);
@@ -66,6 +69,7 @@ export async function POST(request: NextRequest) {
     const results: { cardId: string; success: boolean; fbPostId?: string; error?: string }[] = [];
 
     for (const cardId of cardIds) {
+      let claimed = false;
       try {
         const { data: card } = await admin
           .from("board_cards")
@@ -78,6 +82,22 @@ export async function POST(request: NextRequest) {
           results.push({ cardId, success: false, error: "Card not found" });
           continue;
         }
+
+        // A compare-and-set transition prevents a double-click or a second tab
+        // from publishing the same card twice.
+        const { data: publishingCard, error: claimError } = await admin
+          .from("board_cards")
+          .update({ status: "publishing", facebook_page_id: page.id })
+          .eq("id", cardId)
+          .eq("user_id", user.id)
+          .in("status", ["planned", "scheduled", "failed"])
+          .select("id")
+          .maybeSingle();
+        if (claimError || !publishingCard) {
+          results.push({ cardId, success: false, error: "Already published or currently being processed" });
+          continue;
+        }
+        claimed = true;
 
         let generation = card.generations as { id: string; storage_path: string | null } | null;
         if (!generation?.storage_path && card.prompt_id) {
@@ -133,7 +153,7 @@ export async function POST(request: NextRequest) {
 
         const publishedTimestamp = fbResult.publishedAt || new Date().toISOString();
 
-        await admin.from("posts").insert({
+        const { error: postInsertError } = await admin.from("posts").insert({
           user_id: user.id,
           card_id: card.id,
           facebook_page_id: page.id,
@@ -147,6 +167,7 @@ export async function POST(request: NextRequest) {
           fb_mode: "immediate",
           publish_attempts: 1,
         });
+        if (postInsertError) throw new Error("Could not record the published post");
 
         await admin
           .from("board_cards")
@@ -165,8 +186,12 @@ export async function POST(request: NextRequest) {
 
         results.push({ cardId, success: true, fbPostId: fbResult.fbPostId });
       } catch (postErr: unknown) {
-        const errorMsg = postErr instanceof Error ? postErr.message : "Publish failed";
-        results.push({ cardId, success: false, error: errorMsg });
+        console.error("Batch publish failed", { cardId, postErr });
+        if (claimed) {
+          await admin.from("board_cards").update({ status: "failed" })
+            .eq("id", cardId).eq("user_id", user.id).eq("status", "publishing");
+        }
+        results.push({ cardId, success: false, error: "Publish failed. Check the Page connection and retry." });
       }
     }
 
@@ -180,7 +205,7 @@ export async function POST(request: NextRequest) {
       results,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Batch publish failed";
-    return apiError("INTERNAL_ERROR", msg, 500);
+    console.error("Batch publish failed", err);
+    return apiError("INTERNAL_ERROR", undefined, 500);
   }
 }

@@ -1,12 +1,16 @@
 import { type NextRequest } from "next/server";
 import { createClient, getAuthUser } from "@/app/_lib/supabase/server";
 import { apiError, apiSuccess } from "@/app/_lib/errors";
+import { getSupabaseAdminClient } from "@/app/_lib/supabase/admin";
+import { requireSameOrigin } from "@/app/_lib/api-security";
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
     const user = await getAuthUser();
     if (!user) {
       return apiError("AUTH_UNAUTHORIZED", "Please sign in.", 401);
@@ -14,6 +18,7 @@ export async function POST(
 
     const { id } = await params;
     const supabase = await createClient();
+    const admin = getSupabaseAdminClient();
 
     const { data: post, error } = await supabase
       .from("posts")
@@ -26,31 +31,22 @@ export async function POST(
       return apiError("NOT_FOUND", "Post not found.", 404);
     }
 
-    // Cancel post
-    await supabase
-      .from("posts")
-      .update({ status: "cancelled" })
-      .eq("id", id);
+    if (post.card_id) {
+      const { error: unscheduleError } = await supabase.rpc("unschedule_card", { p_card_id: post.card_id });
+      if (unscheduleError) {
+        console.error("Could not cancel scheduled post", unscheduleError);
+        return apiError("VALIDATION_ERROR", "This post could not be cancelled. Refresh and try again.", 409);
+      }
+    } else {
+      const { error: cancelError } = await admin.from("posts").update({ status: "cancelled" })
+        .eq("id", id).eq("user_id", user.id).eq("status", "scheduled");
+      if (cancelError) return apiError("INTERNAL_ERROR", undefined, 500);
+    }
 
     // If linked to a card, reset card to planned
-    if (post.card_id) {
-      await supabase
-        .from("board_cards")
-        .update({ status: "planned", scheduled_at: null })
-        .eq("id", post.card_id);
-    }
-
-    // Reset prompt to approved
-    if (post.prompt_id) {
-      await supabase
-        .from("prompts")
-        .update({ status: "approved" })
-        .eq("id", post.prompt_id);
-    }
-
     return apiSuccess({ cancelled: true, message: "Scheduled publication cancelled." });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Cancel failed";
-    return apiError("INTERNAL_ERROR", msg, 500);
+    console.error("Post cancellation failed", err);
+    return apiError("INTERNAL_ERROR", undefined, 500);
   }
 }

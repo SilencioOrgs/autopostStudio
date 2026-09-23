@@ -6,7 +6,6 @@ import { CheckCircle2, Layers, ShieldCheck } from "lucide-react";
 import { Stepper } from "@/_components/stepper";
 import { OnboardingFooter } from "@/_components/onboarding-footer";
 import { SETUP_STEPS } from "@/_lib/steps";
-import { Button } from "@/_components/ui/button";
 import { useToast } from "@/_components/ui/toast";
 
 const STYLE_PRESETS = [
