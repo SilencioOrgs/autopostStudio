@@ -1,6 +1,6 @@
 # AutoPost Studio
 
-> **Modern Bahay Kubo Content Engine & Social Publisher**  
+> **Content Engine & Social Publisher**  
 > Turn prompt spreadsheets into 30 days of photorealistic tropical architecture posts with creator-first manual approval.
 
 ---
